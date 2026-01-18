@@ -1,298 +1,212 @@
-// =============================================================================
-// OTTO PING PONG - REALISTIC 3D PERSPECTIVE (WII STYLE)
-// Baseado nas referências visuais: Mesa com profundidade + Esqueleto Visível
-// =============================================================================
-
+// LÓGICA DO JOGO: OTTO PING PONG (ARCADE CLASSIC + VISUAL WII)
 (function() {
-    // Configurações Físicas
-    const TABLE_WIDTH = 500;
-    const TABLE_DEPTH = 800;
-    const TABLE_Y = 0; // Altura da mesa no mundo 3D
-    const NET_Z = 0;
-    const PLAYER_Z = 450;
-    const CPU_Z = -450;
-    const GRAVITY = 0.45;
-    
     const Logic = {
-        score: [0, 0],
-        state: 'menu', // serve, play, point_end
-        
-        // Bola (X, Y, Z) - Y é altura (pra cima é positivo)
-        ball: { x:0, y:50, z:0, vx:0, vy:0, vz:0 },
-        
-        // Raquetes
-        player: { x:0, y:30, width:60 },
-        cpu:    { x:0, y:30, width:60, speed:6, targetX:0 },
-        
-        // Input
-        lastHand: {x:0, y:0},
-        swingSpeed: 0,
-        
-        // Efeitos
-        flash: 0,
+        score: 0,
+        // Bola: X, Y, Z (Profundidade), Velocidades
+        // Começa longe (Z=1200) e vem para perto (Z=0)
+        ball: { x:0, y:0, z:1200, vx:0, vy:0, vz:0 },
+        racket: { x:0, y:0 },
+        state: 'serve', // serve, play
+        flash: 0, // Efeito visual de impacto
 
         init: function() { 
-            this.score = [0, 0]; 
+            this.score = 0; 
             this.state = 'serve';
-            window.System.msg("PING PONG!"); 
-            this.resetBall('player');
+            this.resetBall();
+            window.System.msg("SAQUE!"); 
         },
 
-        resetBall: function(server) {
-            this.ball.vx = 0; this.ball.vy = 0; this.ball.vz = 0;
-            
-            if(server === 'player') {
-                this.state = 'serve';
-                this.ball.x = this.player.x;
-                this.ball.y = 60; // um pouco acima da mesa
-                this.ball.z = PLAYER_Z - 20;
-            } else {
-                this.state = 'play';
-                this.ball.x = this.cpu.x;
-                this.ball.y = 60;
-                this.ball.z = CPU_Z + 20;
-                // Saque CPU
-                this.ball.vz = 18; // Vem na direção do player
-                this.ball.vy = 8;  // Arco leve
-                this.ball.vx = (Math.random()-0.5) * 10;
-                window.System.msg("DEFENDA!");
-            }
+        resetBall: function() {
+            // LÓGICA ANTIGA RESTAURADA: Bola surge no fundo
+            this.ball = { 
+                x: 0, 
+                y: -150, // Altura inicial
+                z: 1200, // Longe
+                vx: (Math.random() - 0.5) * 10, // Efeito lateral
+                vy: 2, 
+                vz: -20 - (this.score * 1.5) // Fica mais rápido a cada ponto
+            };
         },
 
         update: function(ctx, w, h, pose) {
-            const cx = w / 2;
-            const cy = h / 2 - 50; // Horizonte (Ponto de fuga)
+            const cx = w / 2; 
+            const cy = h / 2;
 
-            // --- 1. PROJEÇÃO 3D (A Mágica da Perspectiva) ---
-            // Transforma coordenadas do mundo (x,y,z) em tela (px,py)
-            const project = (x, y, z) => {
-                const fov = 400; // Campo de visão
-                const scale = fov / (fov + (z + 600)); // +600 afasta a câmera
-                return {
-                    x: cx + (x * scale),
-                    y: cy - (y * scale) + 100, // +100 abaixa a câmera para ver a mesa de cima
-                    s: scale
-                };
-            };
-
-            // --- 2. INPUT & ESQUELETO (PADRÃO BOXE) ---
-            let handDetected = false;
-
-            // Fundo Escuro (Estilo Arena das Imagens)
-            const hor = project(0, 0, 10000).y;
-            const grad = ctx.createLinearGradient(0, 0, 0, hor);
-            grad.addColorStop(0, '#111'); grad.addColorStop(1, '#333');
-            ctx.fillStyle = grad; ctx.fillRect(0,0,w,hor); // Parede fundo
-            ctx.fillStyle = '#222'; ctx.fillRect(0,hor,w,h); // Chão
-
-            // DESENHA ESQUELETO (CRUCIAL PARA O USUÁRIO)
+            // --- 1. VISUALIZAÇÃO DO ESQUELETO (CRUCIAL) ---
+            // Desenha o esqueleto antes de tudo para feedback visual
             if(window.Gfx && window.Gfx.drawSkeleton && pose) {
                 ctx.save();
-                ctx.globalAlpha = 0.5; // Transparente para não tapar a mesa
-                ctx.lineWidth = 3;
+                ctx.globalAlpha = 0.5; // Transparente
+                ctx.lineWidth = 4;
                 window.Gfx.drawSkeleton(ctx, pose, w, h);
                 ctx.restore();
             }
 
+            // --- 2. INPUT (RAQUETE) ---
+            let hand = null;
             if(pose) {
-                const rW = pose.keypoints.find(k=>k.name==='right_wrist');
-                const lW = pose.keypoints.find(k=>k.name==='left_wrist');
-                const hand = (rW && rW.score>0.3) ? rW : (lW && lW.score>0.3 ? lW : null);
-
-                if(hand) {
-                    handDetected = true;
-                    // Mapeia a mão 1:1 na tela
-                    const mapped = window.Gfx.map(hand, w, h);
-                    
-                    // Converte posição da tela 2D para posição da raquete no mundo 3D
-                    // Invertemos a lógica da projeção para achar o X
-                    const scaleAtPlayer = 400 / (400 + (PLAYER_Z + 600));
-                    const worldX = (mapped.x - cx) / scaleAtPlayer;
-                    const worldY = (cy + 100 - mapped.y) / scaleAtPlayer;
-
-                    // Move Raquete
-                    this.player.x += (worldX - this.player.x) * 0.5;
-                    this.player.y = Math.max(10, worldY); // Não deixa atravessar a mesa
-
-                    // Calcula velocidade do golpe (Swing)
-                    const dist = Math.hypot(this.player.x - this.lastHand.x, this.player.y - this.lastHand.y);
-                    this.swingSpeed = dist;
-                    this.lastHand = {x:this.player.x, y:this.player.y};
-
-                    // Gesto de Saque
-                    if(this.state === 'serve' && this.swingSpeed > 15) {
-                        window.Sfx.hit();
-                        this.state = 'play';
-                        this.ball.vz = -22; // Vai pro fundo
-                        this.ball.vy = 8;
-                        this.ball.vx = (this.player.x * -0.1); // Ângulo
-                    }
-                }
+                const rw = pose.keypoints.find(k => k.name === 'right_wrist');
+                const lw = pose.keypoints.find(k => k.name === 'left_wrist');
+                if(rw && rw.score > 0.3) hand = rw;
+                else if(lw && lw.score > 0.3) hand = lw;
             }
-            // Limita raquete na mesa
-            this.player.x = Math.max(-TABLE_WIDTH/2, Math.min(TABLE_WIDTH/2, this.player.x));
 
+            if(hand) {
+                const pos = window.Gfx.map(hand, w, h);
+                // Suavização para não tremer
+                this.racket.x += (pos.x - this.racket.x) * 0.6;
+                this.racket.y += (pos.y - this.racket.y) * 0.6;
+            }
 
-            // --- 3. FÍSICA DA BOLA ---
+            // --- 3. LÓGICA DE JOGO (A QUE FUNCIONA) ---
             if(this.state === 'serve') {
-                this.ball.x = this.player.x;
-                this.ball.y = 50 + Math.sin(Date.now()/200)*10;
-                this.ball.z = PLAYER_Z - 10;
+                this.ball.z -= 15; // Aproxima para iniciar
+                if(this.ball.z < 1000) this.state = 'play';
             }
-            else if (this.state === 'play') {
+            else {
+                // Física Simples e Divertida
                 this.ball.x += this.ball.vx;
                 this.ball.y += this.ball.vy;
                 this.ball.z += this.ball.vz;
-                this.ball.vy -= GRAVITY;
 
-                // Quique na Mesa
-                if(this.ball.y < 0) {
-                    // Verifica se caiu dentro da mesa
-                    if(Math.abs(this.ball.x) <= TABLE_WIDTH/2 && Math.abs(this.ball.z) <= TABLE_DEPTH/2) {
-                        this.ball.y = 0;
-                        this.ball.vy = Math.abs(this.ball.vy) * 0.8; // Perde energia
-                        window.Sfx.click();
-                    } else if (this.ball.y < -200) {
-                        // Caiu fora (Chão)
-                        if(this.ball.z > 0) { this.score[1]++; this.resetBall('cpu'); window.Sfx.crash(); } // Erro Player
-                        else { this.score[0]++; this.resetBall('player'); window.Sfx.coin(); } // Erro CPU
-                    }
-                }
+                // Gravidade (Arco da bola)
+                if(this.ball.y < 200) this.ball.vy += 0.25;
 
-                // Rede
-                if(Math.abs(this.ball.z) < 10 && this.ball.y < 25) {
-                    this.ball.vz *= -0.5; // Bate e volta/cai
-                    this.ball.z = (this.ball.z > 0) ? 15 : -15;
-                }
-
-                // Colisão Player
-                if(this.ball.vz > 0 && Math.abs(this.ball.z - PLAYER_Z) < 40) {
-                    // Hitbox circular
-                    const dist = Math.hypot(this.ball.x - this.player.x, this.ball.y - this.player.y);
-                    if(dist < 50) {
-                        window.Sfx.hit();
-                        this.flash = 3;
-                        // Física de Rebatida
-                        this.ball.vz = -25 - (this.swingSpeed * 0.5); // Força
-                        this.ball.vy = 8 + (this.player.y * 0.1); // Lift
-                        // Efeito lateral (Spin)
-                        this.ball.vx = (this.ball.x - this.player.x) * 0.3;
-                    }
-                }
-
-                // Colisão CPU
-                if(this.ball.vz < 0) {
-                    // IA segue a bola
-                    const diff = this.ball.x - this.cpu.x;
-                    this.cpu.x += Math.sign(diff) * Math.min(Math.abs(diff), this.cpu.speed);
+                // --- DETECÇÃO DE BATIDA (HIT) ---
+                // A mágica acontece quando Z está perto de 0 (Tela)
+                if(this.ball.z < 150 && this.ball.z > 0 && this.ball.vz < 0) {
                     
-                    if(Math.abs(this.ball.z - CPU_Z) < 40 && Math.abs(this.ball.x - this.cpu.x) < 50) {
+                    // Projeta onde a bola está na tela 2D
+                    const scale = 500 / (this.ball.z + 500);
+                    const ballScreenX = cx + (this.ball.x * scale);
+                    const ballScreenY = cy + (this.ball.y * scale) + 50; // Ajuste de altura da mesa
+
+                    // Distância Raquete <-> Bola
+                    const dist = Math.hypot(ballScreenX - this.racket.x, ballScreenY - this.racket.y);
+
+                    // HITBOX (Tolerância generosa para ser divertido)
+                    if(dist < w * 0.18) {
                         window.Sfx.hit();
-                        this.ball.vz = 20 + (Math.random()*5);
-                        this.ball.vy = 8;
-                        const aim = (this.player.x > 0) ? -100 : 100;
-                        this.ball.vx = (aim - this.ball.x) * 0.05;
+                        this.score++;
+                        this.flash = 5; // Flash na tela
+
+                        // REBATE A BOLA (Inverte Z)
+                        this.ball.vz = Math.abs(this.ball.vz) + 3; // Volta mais rápida
+                        this.ball.vy = -12; // Joga pra cima
+                        
+                        // Efeito Lateral (Baseado em onde bateu na raquete)
+                        this.ball.vx = (ballScreenX - this.racket.x) * 0.4;
+                        
+                        window.System.msg("BATEU! " + this.score);
                     }
+                }
+
+                // --- CPU REBATE DE VOLTA (LOOP) ---
+                if(this.ball.z > 1500 && this.ball.vz > 0) {
+                    window.Sfx.click(); // Som de quique na mesa lá longe
+                    // CPU devolve
+                    this.ball.vz = -20 - (this.score * 0.8); // Vem rápido
+                    this.ball.vx = (Math.random() - 0.5) * 20; // Mira aleatória
+                    this.ball.vy = -6;
+                }
+
+                // --- GAME OVER (Passou do jogador) ---
+                if(this.ball.z < -200) {
+                    window.System.gameOver(this.score);
                 }
             }
 
-            // --- 4. RENDERIZAÇÃO DA MESA E OBJETOS ---
+            // --- 4. RENDERIZAÇÃO (VISUAL PING PONG WII) ---
+            
+            // Efeito Flash
+            if(this.flash > 0) {
+                ctx.fillStyle = `rgba(255,255,255,${this.flash * 0.2})`;
+                ctx.fillRect(0,0,w,h);
+                this.flash--;
+            }
 
-            // Mesa (Trapézio 3D)
-            const pTL = project(-TABLE_WIDTH/2, 0, -TABLE_DEPTH/2);
-            const pTR = project(TABLE_WIDTH/2, 0, -TABLE_DEPTH/2);
-            const pBL = project(-TABLE_WIDTH/2, 0, TABLE_DEPTH/2);
-            const pBR = project(TABLE_WIDTH/2, 0, TABLE_DEPTH/2);
+            // Fundo (Escuro Profissional)
+            ctx.fillStyle = '#222'; ctx.fillRect(0, 0, w, h);
+            
+            // Horizonte
+            const horizon = h * 0.35;
+            
+            // MESA DE PING PONG (Trapézio Azul)
+            const topW = w * 0.25;  // Largura no fundo (longe)
+            const botW = w * 0.85;  // Largura na frente (perto)
+            
+            ctx.beginPath();
+            ctx.fillStyle = '#2980b9'; // Azul Mesa Oficial
+            ctx.moveTo(cx - topW, horizon); 
+            ctx.lineTo(cx + topW, horizon);
+            ctx.lineTo(cx + botW, h);       
+            ctx.lineTo(cx - botW, h);       
+            ctx.fill();
 
-            // Tampo da Mesa (Azul Profissional igual imagem)
-            ctx.fillStyle = '#2980b9'; // Azul
-            ctx.beginPath(); ctx.moveTo(pTL.x, pTL.y); ctx.lineTo(pTR.x, pTR.y);
-            ctx.lineTo(pBR.x, pBR.y); ctx.lineTo(pBL.x, pBL.y); ctx.fill();
-
-            // Bordas Brancas
-            ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
-            ctx.beginPath(); 
-            ctx.moveTo(pTL.x, pTL.y); ctx.lineTo(pBL.x, pBL.y);
-            ctx.moveTo(pTR.x, pTR.y); ctx.lineTo(pBR.x, pBR.y);
-            ctx.moveTo(pTL.x, pTL.y); ctx.lineTo(pTR.x, pTR.y);
-            ctx.moveTo(pBL.x, pBL.y); ctx.lineTo(pBR.x, pBR.y);
+            // Bordas Brancas da Mesa
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(cx - topW, horizon); ctx.lineTo(cx - botW, h); // Esq
+            ctx.moveTo(cx + topW, horizon); ctx.lineTo(cx + botW, h); // Dir
+            ctx.moveTo(cx - topW, horizon); ctx.lineTo(cx + topW, horizon); // Fundo
+            ctx.moveTo(cx - botW, h); ctx.lineTo(cx + botW, h); // Frente
             // Linha Central
-            const midTop = project(0, 0, -TABLE_DEPTH/2);
-            const midBot = project(0, 0, TABLE_DEPTH/2);
-            ctx.moveTo(midTop.x, midTop.y); ctx.lineTo(midBot.x, midBot.y);
+            ctx.moveTo(cx, horizon); ctx.lineTo(cx, h);
             ctx.stroke();
 
-            // Rede
-            ctx.fillStyle = 'rgba(200,200,200,0.5)';
-            const netL = project(-TABLE_WIDTH/2-20, 25, 0); const netR = project(TABLE_WIDTH/2+20, 25, 0);
-            const netBL = project(-TABLE_WIDTH/2-20, 0, 0); const netBR = project(TABLE_WIDTH/2+20, 0, 0);
-            ctx.beginPath(); ctx.moveTo(netL.x, netL.y); ctx.lineTo(netR.x, netR.y);
-            ctx.lineTo(netBR.x, netBR.y); ctx.lineTo(netBL.x, netBL.y); ctx.fill();
-            ctx.fillStyle='#fff'; ctx.fillRect(netL.x, netL.y, netR.x-netL.x, 2); // Topo
+            // Rede (No meio da profundidade)
+            const netY = horizon + (h - horizon) * 0.3; // Posição visual da rede
+            const netW = w * 0.45; // Largura visual da rede
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            ctx.fillRect(cx - netW/2, netY - 20, netW, 20);
+            ctx.fillStyle = '#eee'; ctx.fillRect(cx - netW/2, netY - 20, netW, 3); // Topo rede
 
-            // Objetos (Sort Z)
-            const objs = [
-                {t:'ball', ...this.ball},
-                {t:'player', ...this.player, z:PLAYER_Z},
-                {t:'cpu', ...this.cpu, z:CPU_Z}
-            ];
-            objs.sort((a,b) => a.z - b.z);
+            // BOLA
+            const scale = 500 / (this.ball.z + 500);
+            if(scale > 0) {
+                const bx = cx + (this.ball.x * scale);
+                const by = cy + (this.ball.y * scale) + 50; // Ajuste de altura
+                const size = (w * 0.05) * scale;
 
-            objs.forEach(o => {
-                const pos = project(o.x, o.y, o.z);
-                const shadow = project(o.x, 0, o.z);
-                const s = pos.s;
-
-                // Sombra
+                // Sombra da Bola (Dá noção de altura)
+                const shadowY = cy + (180 * scale) + 50; // Chão da mesa
                 ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                ctx.beginPath(); ctx.ellipse(shadow.x, shadow.y, 15*s, 6*s, 0, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.ellipse(bx, shadowY, size, size*0.3, 0, 0, Math.PI*2); ctx.fill();
 
-                if(o.t === 'ball') {
-                    const bSz = 8 * s;
-                    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(pos.x, pos.y, bSz, 0, Math.PI*2); ctx.fill();
-                } else {
-                    // Raquete (Círculo Vermelho/Azul)
-                    const rSz = 25 * s;
-                    ctx.fillStyle = o.t==='player' ? '#e74c3c' : '#3498db'; // Vermelho ou Azul
-                    
-                    // Cabo da raquete
-                    ctx.fillStyle = '#d35400';
-                    const handleY = o.t==='player' ? 20*s : -20*s;
-                    ctx.fillRect(pos.x - 5*s, pos.y + handleY, 10*s, 20*s);
-
-                    // Borracha
-                    ctx.fillStyle = o.t==='player' ? '#c0392b' : '#2980b9';
-                    ctx.beginPath(); ctx.arc(pos.x, pos.y, rSz, 0, Math.PI*2); ctx.fill();
-                    
-                    // Brilho
-                    ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth=2;
-                    ctx.beginPath(); ctx.arc(pos.x, pos.y, rSz-2, 0, Math.PI*2); ctx.stroke();
-                }
-            });
-
-            // Placar na Parede
-            if(this.flash > 0) {
-                ctx.fillStyle = `rgba(255,255,255,${this.flash*0.2})`; ctx.fillRect(0,0,w,h); this.flash--;
+                // Bola Branca
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); ctx.arc(bx, by, size, 0, Math.PI*2); ctx.fill();
+                // Brilho
+                ctx.fillStyle = '#eee'; 
+                ctx.beginPath(); ctx.arc(bx - size*0.3, by - size*0.3, size*0.2, 0, Math.PI*2); ctx.fill();
             }
+
+            // RAQUETE DO JOGADOR
+            const rSize = w * 0.15;
+            // Cabo
+            ctx.strokeStyle = '#d35400'; ctx.lineWidth = 15; ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.moveTo(this.racket.x, this.racket.y); ctx.lineTo(this.racket.x, this.racket.y + rSize); ctx.stroke();
             
-            // HUD Placar (Estilo Imagem 2)
-            ctx.fillStyle = 'white'; ctx.font = "bold 40px Arial";
-            ctx.fillText(this.score[1], cx, hor - 50); // CPU
-            ctx.fillText(this.score[0], cx, h - 50); // Player
+            // Borracha Vermelha
+            ctx.fillStyle = '#c0392b'; 
+            ctx.beginPath(); 
+            ctx.arc(this.racket.x, this.racket.y, rSize/2, 0, Math.PI*2);
+            ctx.fill(); 
+            // Borda Madeira
+            ctx.strokeStyle = '#f39c12'; ctx.lineWidth = 3; ctx.stroke();
+            
+            // Placar HUD
+            ctx.fillStyle = "white"; ctx.font = "bold 30px Arial"; ctx.textAlign = "left";
+            ctx.fillText("SCORE: " + this.score, 30, 50);
 
-            // Bandeiras/Nomes
-            ctx.font = "14px Arial"; ctx.textAlign="center";
-            ctx.fillText("CPU", cx, hor - 20);
-            ctx.fillText("VOCÊ", cx, h - 20);
-
-            return this.score[0];
+            return this.score;
         }
     };
 
-    // REGISTRO NO SISTEMA
+    // REGISTRO
     const regLoop = setInterval(() => {
         if(window.System && window.System.registerGame) {
-            window.System.registerGame('tennis', 'Otto PingPong', '🏓', Logic, {camOpacity: 0.2, showWheel: false});
+            window.System.registerGame('tennis', 'Otto PingPong', '🏓', Logic, {camOpacity: 0.5, showWheel: false});
             clearInterval(regLoop);
         }
     }, 100);
