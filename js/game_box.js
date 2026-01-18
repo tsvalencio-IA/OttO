@@ -3,9 +3,12 @@
     const Logic = {
         sc:0, tg:[], last:0,
         init: function(){ this.sc=0; this.tg=[]; window.System.msg("BOXE!"); },
+        
         update: function(ctx, w, h, pose){
             const now=Date.now();
             ctx.clearRect(0,0,w,h); 
+            
+            // 1. DESENHA ESQUELETO E LUVAS
             if(window.Gfx) window.Gfx.drawSkeleton(ctx, pose, w, h);
             
             let hits=[];
@@ -14,14 +17,20 @@
                 if(lw&&lw.score>0.3) hits.push(window.Gfx.map(lw,w,h));
                 if(rw&&rw.score>0.3) hits.push(window.Gfx.map(rw,w,h));
             }
+
+            // GERA ALVOS
             if(now-this.last>800){
                 this.tg.push({x:Math.random()*(w*0.8)+w*0.1, y:Math.random()*(h*0.5)+h*0.1, r:w*0.08, s:now});
                 this.last=now;
             }
+
+            // DESENHA ALVOS E DETECTA COLISÃO
             this.tg.forEach((t,i)=>{
                 const age=(now-t.s)/1500; if(age>1){this.tg.splice(i,1); return;}
+                
                 ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI*2);
                 ctx.fillStyle=`rgba(255,255,0,${1-age})`; ctx.fill(); ctx.stroke();
+                
                 hits.forEach(h=>{
                     if(Math.hypot(h.x-t.x, h.y-t.y)<t.r*1.5){
                         this.tg.splice(i,1); this.sc+=100; window.Sfx.hit();
