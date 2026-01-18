@@ -45,10 +45,41 @@
         .wii-btn-round { width: 40px; height: 40px; background: #eee; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #aaa; color: #888; font-weight: bold; font-size: 0.8rem; }
         #hud-score { font-family: 'Russo One', sans-serif; text-shadow: 2px 2px 0 #000; }
         
-        /* VOLANTE VISUAL */
-        #ui-wheel { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 20; }
-        .steering-wheel { width: 140px; height: 140px; border: 8px solid #ccc; border-radius: 50%; background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.8) 41%); box-shadow: 0 0 20px rgba(0,0,0,0.5), inset 0 0 10px rgba(0,0,0,0.8); position: relative; transition: transform 0.1s; }
-        .wheel-center-mark { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); width: 10px; height: 20px; background: red; border-radius: 2px; box-shadow: 0 0 5px red; }
+                /* VOLANTE VISUAL (AUMENTADO) */
+        #ui-wheel { 
+            position: absolute; 
+            top: 50px; /* Desci um pouco para não cortar no topo */
+            left: 50%; 
+            transform: translateX(-50%); 
+            opacity: 0; 
+            transition: opacity 0.3s; 
+            pointer-events: none; 
+            z-index: 20; 
+        }
+
+        .steering-wheel { 
+            width: 300px;  /* ANTES ERA 140px -> AUMENTADO */
+            height: 300px; /* ANTES ERA 140px -> AUMENTADO */
+            border: 12px solid #ccc; /* Borda mais grossa */
+            border-radius: 50%; 
+            background: radial-gradient(circle, transparent 50%, rgba(0,0,0,0.8) 51%); 
+            box-shadow: 0 0 30px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.8); 
+            position: relative; 
+            transition: transform 0.1s; 
+        }
+
+        .wheel-center-mark { 
+            position: absolute; 
+            top: -12px; 
+            left: 50%; 
+            transform: translateX(-50%); 
+            width: 15px; 
+            height: 30px; 
+            background: red; 
+            border-radius: 4px; 
+            box-shadow: 0 0 10px red;
+        }
+
         
         .btn-action { background: linear-gradient(to bottom, #4facfe 0%, #00f2fe 100%); border: 2px solid white; color: white; padding: 15px 30px; border-radius: 50px; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
     </style>
