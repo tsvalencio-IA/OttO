@@ -3,11 +3,11 @@
     const Logic = {
         s:0, p:0, x:0, st:0, c:0, obs:[],
         init: function(){ this.s=0; this.p=0; this.x=0; this.obs=[]; window.System.msg("SEGURE O VOLANTE!"); },
+        
         update: function(ctx, w, h, pose){
             const cx=w/2; let ang=0;
-            // 1. Volante (Feedback Visual + Input)
-            if(window.Gfx) window.Gfx.drawSteeringHands(ctx, pose, w, h);
-
+            
+            // 1. INPUT
             if(pose){
                 const kp=pose.keypoints, lw=kp.find(k=>k.name==='left_wrist'), rw=kp.find(k=>k.name==='right_wrist');
                 if(lw&&rw&&lw.score>0.3&&rw.score>0.3){
@@ -17,17 +17,18 @@
                 } else { this.s*=0.95; }
             }
             this.st+=(ang-this.st)*0.2;
-            const wheel=document.getElementById('visual-wheel'); if(wheel) wheel.style.transform=`rotate(${this.st*57}deg)`;
+            const wheel=document.getElementById('visual-wheel'); 
+            if(wheel) wheel.style.transform=`rotate(${this.st*57}deg)`;
             
-            // 2. Física
+            // 2. FÍSICA
             this.p+=this.s; this.c=Math.sin(this.p*0.005)*1.5;
             this.x+=this.st*(this.s/(h*0.5)); this.x-=this.c*(this.s/h);
             if(Math.abs(this.x)>1.3) this.s*=0.9;
             
-            // 3. Obstáculos
+            // 3. OBSTÁCULOS
             if(Math.random()<0.02 && this.s>5) this.obs.push({x:(Math.random()*2)-1, z:1000});
 
-            // 4. Desenho (Estrada)
+            // 4. DESENHO (ESTRADA)
             ctx.fillStyle='#111'; ctx.fillRect(0,0,w,h);
             const hor=h*0.4;
             ctx.strokeStyle='#00ffcc'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,hor); ctx.lineTo(w,hor); ctx.stroke();
@@ -37,6 +38,7 @@
             ctx.strokeStyle='#ffeb3b'; ctx.lineWidth=w*0.02; ctx.setLineDash([h*0.05, h*0.05]); ctx.lineDashOffset=-this.p;
             ctx.beginPath(); ctx.moveTo(cx+off, hor); ctx.quadraticCurveTo(cx+(off*0.5), h*0.7, cx, h); ctx.stroke(); ctx.setLineDash([]);
 
+            // OBSTÁCULOS
             this.obs.forEach((o,i)=>{
                 o.z-=this.s*2; if(o.z<-100){this.obs.splice(i,1); return;}
                 const sc=500/(o.z+100);
@@ -50,12 +52,16 @@
                 }
             });
 
+            // CARRO
             const carX=cx+(this.x*w*0.25);
             ctx.save(); ctx.translate(carX, h*0.85); ctx.rotate(this.st); const s=w*0.003; ctx.scale(s,s);
             ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(-25,-10,50,40);
             ctx.fillStyle='#ff0033'; ctx.beginPath(); ctx.roundRect(-20,-20,40,40,5); ctx.fill();
             ctx.fillStyle='#111'; ctx.fillRect(-15,-10,30,10);
             ctx.restore();
+
+            // 5. LUVAS (DESENHADAS POR CIMA DE TUDO)
+            if(window.Gfx) window.Gfx.drawSteeringHands(ctx, pose, w, h);
 
             return Math.floor(this.p/100);
         }
@@ -69,3 +75,4 @@
         }
     }, 100);
 })();
+l
