@@ -4,8 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>thIAguinho Wii: MODULAR OS</title>
+    <title>thIAguinho Wii: OTTO EDITION</title>
     
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
@@ -19,15 +18,13 @@
         :root { --wii-bg: #e6e6e6; --wii-highlight: #68c9e6; }
         body { background-color: #000; margin: 0; padding: 0; overflow: hidden; font-family: 'Roboto', sans-serif; touch-action: none; user-select: none; width: 100vw; height: 100dvh; }
         
-        /* LAYERS */
-        #os-layer { position: relative; width: 100%; height: 100%; background: transparent; pointer-events: none; z-index: 50; }
         #game-hardware { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; background: #000; }
-        #video-source { display: none; }
+        #os-layer { position: relative; width: 100%; height: 100%; background: transparent; pointer-events: none; z-index: 50; }
+        
         #webcam { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0; transition: opacity 0.5s; }
         #game-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
         
-        /* SCREENS */
-        .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--wii-bg); pointer-events: auto; transition: opacity 0.3s, transform 0.3s; }
+        .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--wii-bg); pointer-events: auto; transition: opacity 0.3s; }
         .hidden { opacity: 0; pointer-events: none; z-index: -1; }
 
         /* MENU GRID */
@@ -39,65 +36,103 @@
         .channel:active { transform: scale(0.95); border-color: var(--wii-highlight); }
         .channel-icon { font-size: clamp(2rem, 5vw, 4rem); margin-bottom: 5px; }
         .channel-name { font-size: clamp(0.6rem, 2vw, 0.9rem); color: #888; text-transform: uppercase; font-weight: bold; }
+        .channel-empty { background: #eee; }
         
-        /* UI ELEMENTS */
         .bottom-bar { position: absolute; bottom: 0; width: 100%; height: 12%; background: #cdcdcd; border-top: 2px solid #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; box-sizing: border-box; }
         .wii-btn-round { width: 40px; height: 40px; background: #eee; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #aaa; color: #888; font-weight: bold; font-size: 0.8rem; }
+        
+        #game-ui { pointer-events: none; }
+        .hud-element { pointer-events: auto; }
         #hud-score { font-family: 'Russo One', sans-serif; text-shadow: 2px 2px 0 #000; }
         
-                /* VOLANTE VISUAL (AUMENTADO) */
-        #ui-wheel { 
-            position: absolute; 
-            top: 50px; /* Desci um pouco para não cortar no topo */
-            left: 50%; 
-            transform: translateX(-50%); 
-            opacity: 0; 
-            transition: opacity 0.3s; 
-            pointer-events: none; 
-            z-index: 20; 
+        /* --- NOVO VOLANTE REALISTA (CSS PRO) --- */
+        #ui-wheel {
+            position: absolute;
+            top: 20px; /* Topo da tela */
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            opacity: 0;
+            transition: opacity 0.3s;
         }
 
-        .steering-wheel { 
-            width: 300px;  /* ANTES ERA 140px -> AUMENTADO */
-            height: 300px; /* ANTES ERA 140px -> AUMENTADO */
-            border: 12px solid #ccc; /* Borda mais grossa */
-            border-radius: 50%; 
-            background: radial-gradient(circle, transparent 50%, rgba(0,0,0,0.8) 51%); 
-            box-shadow: 0 0 30px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.8); 
-            position: relative; 
-            transition: transform 0.1s; 
+        .steering-wheel {
+            width: 280px;
+            height: 280px;
+            border-radius: 50%;
+            /* Aro Grosso e Texturizado */
+            border: 20px solid #222;
+            background: rgba(0, 0, 0, 0.1);
+            box-shadow: 
+                inset 0 0 15px rgba(0,0,0,0.8), /* Sombra interna do aro */
+                0 5px 20px rgba(0,0,0,0.5); /* Sombra projetada */
+            position: relative;
+            transition: transform 0.1s linear;
         }
 
-        .wheel-center-mark { 
-            position: absolute; 
-            top: -12px; 
-            left: 50%; 
-            transform: translateX(-50%); 
-            width: 15px; 
-            height: 30px; 
-            background: red; 
-            border-radius: 4px; 
-            box-shadow: 0 0 10px red;
+        /* Raio Horizontal (Spoke) */
+        .steering-wheel::before {
+            content: '';
+            position: absolute;
+            top: 50%; left: 0;
+            width: 100%; height: 25px;
+            background: linear-gradient(to bottom, #444, #222);
+            transform: translateY(-50%);
+            z-index: -1;
+            border-radius: 5px;
         }
 
-        
+        /* Raio Vertical (Spoke de baixo) */
+        .steering-wheel::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 50%;
+            width: 25px; height: 50%;
+            background: linear-gradient(to right, #444, #222);
+            transform: translateX(-50%);
+            z-index: -1;
+        }
+
+        /* Centro do Volante (Buzina) */
+        .wheel-center-mark {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px; height: 60px;
+            background: radial-gradient(circle, #555, #111);
+            border-radius: 50%;
+            border: 2px solid #666;
+            box-shadow: 0 0 10px rgba(0,0,0,0.8);
+        }
+
+        /* Marcador de Centro (Vermelho no topo) */
+        .wheel-center-stripe {
+            position: absolute;
+            top: -20px; left: 50%;
+            transform: translateX(-50%);
+            width: 15px; height: 20px;
+            background: #ff0000;
+            z-index: 10;
+            box-shadow: 0 0 5px #ff0000;
+        }
+
         .btn-action { background: linear-gradient(to bottom, #4facfe 0%, #00f2fe 100%); border: 2px solid white; color: white; padding: 15px 30px; border-radius: 50px; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
     </style>
 </head>
 <body>
 
 <div id="game-hardware">
-    <video id="video-source" playsinline></video>
+    <video id="video-source" playsinline style="display:none"></video>
     <video id="webcam" autoplay muted playsinline></video>
     <canvas id="game-canvas"></canvas>
 </div>
 
 <div id="os-layer">
-    <div id="screen-safety" class="screen">
+    <div id="screen-safety" class="screen" style="z-index: 100;">
         <div style="border:1px solid #ccc; padding:2rem; width:90%; max-width:600px; background:#fff; border-radius:8px; text-align:center;">
             <h1 class="text-xl md:text-2xl font-bold mb-4">Saúde e Segurança</h1>
-            <p class="mb-6 text-sm text-gray-600">⚠️ Mantenha distância da tela e certifique-se de ter espaço.</p>
-            <button onclick="System.boot()" class="btn-action text-lg animate-pulse">Tocar para Iniciar (A)</button>
+            <p class="mb-6 text-sm text-gray-600">⚠️ Certifique-se de ter espaço livre.</p>
+            <button onclick="window.System.boot()" class="btn-action animate-pulse">Tocar para Iniciar (A)</button>
             <div id="boot-log" class="mt-4 text-xs text-cyan-500 font-mono h-4"></div>
         </div>
     </div>
@@ -108,8 +143,7 @@
     </div>
 
     <div id="screen-menu" class="screen hidden">
-        <div class="wii-grid" id="channel-grid">
-            </div>
+        <div class="wii-grid" id="channel-grid"></div>
         <div class="bottom-bar justify-between">
             <div class="wii-btn-round">Otto</div>
             <div class="text-gray-500 font-bold text-sm tracking-widest">MENU</div>
@@ -118,30 +152,32 @@
     </div>
 
     <div id="game-ui" class="screen hidden" style="background: transparent;">
-        <button onclick="System.home()" style="position:absolute; top:1rem; right:1rem; background:rgba(59,130,246,0.8); color:white; width:2.5rem; height:2.5rem; border-radius:9999px; border:2px solid white; font-weight:bold; font-size:0.75rem; pointer-events:auto;">⌂</button>
+        <button onclick="window.System.home()" class="hud-element" style="position:absolute; top:1rem; right:1rem; background:rgba(59,130,246,0.8); color:white; width:2.5rem; height:2.5rem; border-radius:9999px; border:2px solid white; font-weight:bold; font-size:0.75rem; display:flex; align-items:center; justify-content:center;">⌂</button>
+        
         <div style="position:absolute; bottom:1rem; left:1rem; background:rgba(0,0,0,0.6); padding:0.5rem 1rem; border-radius:9999px; border:1px solid rgba(255,255,255,0.3);">
-            <span style="font-size:0.6rem; color:#67e8f9; display:block; line-height:1;">SCORE</span>
-            <div id="hud-score" style="font-size:1.5rem; color:white; line-height:1;">0</div>
+            <span style="font-size:0.6rem; color:#67e8f9; display:block;">SCORE</span>
+            <div id="hud-score" style="font-size:1.5rem; color:white; font-family:'Russo One';">0</div>
         </div>
+
         <div id="game-msg" style="position:absolute; top:33%; width:100%; text-align:center; font-size:3rem; color:#facc15; font-weight:900; text-shadow:2px 2px 0 #000;"></div>
         
         <div id="ui-wheel">
             <div id="visual-wheel" class="steering-wheel">
-                <div class="wheel-center-mark"></div><div class="wheel-spoke"></div>
+                <div class="wheel-center-stripe"></div>
+                <div class="wheel-center-mark"></div>
             </div>
         </div>
 
-        <div style="position:absolute; bottom:1rem; right:5rem; background:rgba(0,0,0,0.5); padding:0.5rem; border-radius:9999px; pointer-events:auto; display:flex; align-items:center; gap:0.5rem;">
+        <div class="hud-element" style="position:absolute; bottom:1rem; right:5rem; background:rgba(0,0,0,0.5); padding:0.5rem; border-radius:9999px; display:flex; align-items:center; gap:0.5rem;">
             <span style="font-size:0.6rem; color:white;">SENS</span>
-            <input type="range" min="0.5" max="3.0" step="0.5" value="1.0" style="width:5rem;" oninput="System.setSens(this.value)">
+            <input type="range" min="0.5" max="3.0" step="0.5" value="1.0" style="width:5rem;" oninput="window.System.setSens(this.value)">
         </div>
     </div>
 
     <div id="screen-over" class="screen hidden" style="background: rgba(255,255,255,0.95); z-index: 60;">
         <h1 class="text-5xl text-gray-800 font-black mb-2">FIM</h1>
-        <div class="text-xl text-cyan-600 font-bold">PONTUAÇÃO</div>
         <div id="final-score" class="text-7xl text-gray-800 font-bold mb-8 font-mono">0</div>
-        <button onclick="System.menu()" class="btn-action">VOLTAR AO MENU</button>
+        <button onclick="window.System.menu()" class="btn-action">VOLTAR AO MENU</button>
     </div>
 </div>
 
@@ -149,8 +185,8 @@
 <script src="js/game_kart.js"></script>
 <script src="js/game_run.js"></script>
 <script src="js/game_box.js"></script>
-<script src="js/game_tennis.js"></script> <script>
-    // Inicia o relógio
+
+<script>
     setInterval(() => {
         document.getElementById('clock').innerText = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
     }, 1000);
