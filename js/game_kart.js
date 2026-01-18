@@ -1,226 +1,182 @@
-// LÓGICA DO JOGO: KART DO OTTO (CORRIGIDO: SEM TOMBAR + VISUAL SNES)
+// LÓGICA DO JOGO: KART DO OTTO (ENGINE V.2 - PARALLAX SPRITE)
 (function() {
     const Logic = {
-        s: 0, p: 0, x: 0, st: 0, c: 0, obs: [],
+        speed: 0, pos: 0, x: 0, steer: 0, curve: 0, obs: [],
         
         init: function() { 
-            this.s = 0; this.p = 0; this.x = 0; this.obs = []; 
-            window.System.msg("SEGURE O VOLANTE!"); 
+            this.speed = 0; this.pos = 0; this.x = 0; this.obs = []; 
+            window.System.msg("LIGUE OS MOTORES!"); 
         },
         
         update: function(ctx, w, h, pose) {
+            const d = Logic; 
             const cx = w / 2;
-            let ang = 0;
 
-            // --- 1. INPUT (VOLANTE) ---
-            if(window.Gfx && window.Gfx.drawSteeringHands) {
-                 window.Gfx.drawSteeringHands(ctx, pose, w, h);
-            }
-
+            // --- 1. INPUT ---
+            let targetAngle = 0;
             if(pose) {
                 const kp = pose.keypoints;
-                const lw = kp.find(k => k.name === 'left_wrist');
-                const rw = kp.find(k => k.name === 'right_wrist');
+                const lw = kp.find(k=>k.name==='left_wrist');
+                const rw = kp.find(k=>k.name==='right_wrist');
                 
-                // Exige confiança alta para evitar tremedeira
+                // Exige as duas mãos para validar o volante
                 if(lw && rw && lw.score > 0.4 && rw.score > 0.4) {
                     const dy = rw.y - lw.y; 
                     const dx = rw.x - lw.x;
-                    // Ajuste de sensibilidade para ficar "1:1" com a mão
-                    ang = Math.atan2(dy, dx) * 1.3 * window.System.sens;
+                    targetAngle = Math.atan2(dy, dx) * 1.5 * window.System.sens;
                     
-                    // Acelera se estiver segurando o volante (mãos detectadas)
-                    if(this.s < h * 0.05) this.s += h * 0.0005;
+                    // Acelera
+                    if(d.speed < h * 0.05) d.speed += h * 0.0006; 
                 } else { 
-                    this.s *= 0.96; // Freia se soltar
+                    d.speed *= 0.96; // Freio motor
                 }
             }
-            // Suavização ajustada para resposta mais rápida (Sem lag)
-            this.st += (ang - this.st) * 0.3;
+            // Suavização da direção (Lerp)
+            d.steer += (targetAngle - d.steer) * 0.2;
             
-            // Atualiza volante da UI (HTML)
-            const wheel = document.getElementById('visual-wheel'); 
-            if(wheel) wheel.style.transform = `rotate(${this.st * 57}deg)`;
+            // UI Volante (Rotação real HTML)
+            const wheel = document.getElementById('visual-wheel');
+            if(wheel) wheel.style.transform = `rotate(${d.steer * 60}deg)`;
 
-            // --- 2. FÍSICA (ARCADE) ---
-            this.p += this.s; 
-            // Curva da pista baseada no tempo
-            this.c = Math.sin(this.p * 0.003) * 1.5;
+            // --- 2. FÍSICA ---
+            d.pos += d.speed;
+            d.curve = Math.sin(d.pos * 0.004) * 1.5;
+            d.x += d.steer * (d.speed / (h * 0.5));
+            d.x -= d.curve * (d.speed / h);
             
-            // Movimento lateral do carro (Direção + Força Centrifuga da curva)
-            this.x += this.st * (this.s / (h * 0.45)); 
-            this.x -= this.c * (this.s / h); 
-            
-            // Limites da pista (Bate e perde velocidade)
-            if(Math.abs(this.x) > 1.4) { 
-                this.s *= 0.85; 
-                this.x = (this.x > 0 ? 1.4 : -1.4); // Trava na borda
+            // Colisão com borda (Ricochete suave)
+            if(Math.abs(d.x) > 1.3) { 
+                d.speed *= 0.8; 
+                d.x = d.x > 0 ? 1.3 : -1.3;
             }
 
-            // --- 3. OBSTÁCULOS ---
-            if(Math.random() < 0.015 && this.s > 5) {
-                this.obs.push({x: (Math.random() * 2.2) - 1.1, z: 1000}); 
-            }
-
-            // --- 4. RENDERIZAÇÃO (VISUAL ESTILO NINTENDO) ---
-
-            // A. CÉU
+            // --- 3. RENDERIZAÇÃO DE PISTA ---
+            
+            // Céu
             const horizon = h * 0.4;
-            const gradSky = ctx.createLinearGradient(0, 0, 0, horizon);
-            gradSky.addColorStop(0, "#0099cc"); // Azul Mario Kart
-            gradSky.addColorStop(1, "#99ccff"); 
-            ctx.fillStyle = gradSky; 
-            ctx.fillRect(0, 0, w, horizon);
-
-            // B. GRAMADO (BACKGROUND)
-            ctx.fillStyle = '#3dae36'; // Verde Nintendo
-            ctx.fillRect(0, horizon, w, h - horizon);
-
-            // C. ESTRADA (TRAPÉZIO)
-            const topW = w * 0.02; 
-            const botW = w * 1.6; // Pista larga na base
-            const curveOffset = this.c * (w * 0.5); // Curva visual
-
-            // Desenha Zebras (Efeito de velocidade nas bordas)
-            const zebraW = w * 0.15;
-            const zebraColor = (Math.floor(this.p / 40) % 2 === 0) ? '#e60000' : '#ffffff'; // Pisca
+            ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, 0, w, horizon);
             
-            ctx.beginPath();
-            ctx.fillStyle = zebraColor;
-            // Trapézio maior para as zebras
-            ctx.moveTo(cx + curveOffset - topW - (zebraW*0.1), horizon);
-            ctx.lineTo(cx + curveOffset + topW + (zebraW*0.1), horizon);
-            ctx.lineTo(cx + botW + zebraW, h);
-            ctx.lineTo(cx - botW - zebraW, h);
-            ctx.fill();
+            // Grama
+            ctx.fillStyle = '#3dae36'; ctx.fillRect(0, horizon, w, h);
 
-            // Asfalto
+            // Estrada (Trapézio)
+            const topW = w * 0.02; 
+            const botW = w * 1.4;
+            const curveOff = d.curve * (w * 0.4);
+
             ctx.beginPath();
-            ctx.fillStyle = '#555'; // Cinza asfalto
-            ctx.moveTo(cx + curveOffset - topW, horizon);
-            ctx.lineTo(cx + curveOffset + topW, horizon);
+            ctx.fillStyle = '#555'; // Asfalto
+            ctx.moveTo(cx + curveOff - topW, horizon);
+            ctx.lineTo(cx + curveOff + topW, horizon);
             ctx.lineTo(cx + botW, h);
             ctx.lineTo(cx - botW, h);
             ctx.fill();
 
-            // Linha Central
+            // Zebras (Detalhe crucial para sensação de velocidade)
+            const zebraSize = 20;
+            const offsetZebra = (d.pos % zebraSize) / zebraSize;
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 4;
+            // (Simplificado para performance, usando linha central)
+            ctx.beginPath();
             ctx.strokeStyle = '#ffcc00'; 
-            ctx.lineWidth = w * 0.015;
-            ctx.setLineDash([h * 0.05, h * 0.1]); 
-            ctx.lineDashOffset = -this.p; 
-            ctx.beginPath(); 
-            ctx.moveTo(cx + curveOffset, horizon); 
-            ctx.quadraticCurveTo(cx + (curveOffset * 0.5), h * 0.7, cx, h); 
+            ctx.lineWidth = w * 0.01;
+            ctx.setLineDash([50, 50]); 
+            ctx.lineDashOffset = -d.pos;
+            ctx.moveTo(cx + curveOff, horizon); 
+            ctx.quadraticCurveTo(cx + (curveOff * 0.5), h * 0.7, cx, h); 
             ctx.stroke(); 
             ctx.setLineDash([]);
 
-            // D. OBSTÁCULOS
-            this.obs.forEach((o, i) => {
-                o.z -= this.s * 2; 
-                if(o.z < -100) { this.obs.splice(i, 1); return; }
+            // Obstáculos
+            // (Mantive sua lógica de spawn, mas melhorei o desenho)
+            if(Math.random() < 0.02 && d.speed > 5) d.obs.push({x: (Math.random()*2)-1, z: 1000}); 
+            
+            d.obs.forEach((o, i) => {
+                o.z -= d.speed * 2; 
+                if(o.z < -100) { d.obs.splice(i,1); return; }
                 
                 const scale = 500 / (o.z + 100);
                 if(scale > 0 && o.z < 1000) {
-                    const cOff = this.c * (w * 0.3) * (1 - (o.z / 1000));
-                    const ox = cx + cOff + (o.x * w * 0.5 * scale);
-                    const oy = (h * 0.4) + (50 * scale);
-                    const sz = (w * 0.1) * scale;
-
-                    // Cone
-                    ctx.fillStyle = '#ff6600'; 
-                    ctx.beginPath();
-                    ctx.moveTo(ox, oy - sz);
-                    ctx.lineTo(ox - (sz*0.4), oy);
-                    ctx.lineTo(ox + (sz*0.4), oy);
-                    ctx.fill();
+                    const objX = cx + (d.curve * w * 0.3 * (1 - o.z/1000)) + (o.x * w * 0.5 * scale);
+                    const objY = (h * 0.4) + (50 * scale);
+                    const size = (w * 0.1) * scale;
                     
-                    if(o.z < 100 && o.z > 0 && Math.abs(this.x - o.x) < 0.35) {
-                        this.s *= 0.3; // Batida forte
+                    // Desenho Cone
+                    ctx.fillStyle = '#ff4400';
+                    ctx.beginPath(); ctx.moveTo(objX, objY - size); 
+                    ctx.lineTo(objX - size/3, objY); ctx.lineTo(objX + size/3, objY); ctx.fill();
+                    
+                    if(o.z < 100 && o.z > 0 && Math.abs(d.x - o.x) < 0.35) {
+                        d.speed *= 0.2; 
                         window.Sfx.crash(); 
-                        this.obs.splice(i, 1); 
-                        ctx.fillStyle = 'white'; // Flash
-                        ctx.fillRect(0, 0, w, h);
+                        d.obs.splice(i,1);
                     }
                 }
             });
 
-            // E. KART DO JOGADOR (SEM TOMBAR - EFEITO PARALAXE)
-            const carX = cx + (this.x * w * 0.25);
+            // --- 4. RENDERIZAÇÃO DO KART (TÉCNICA SPRITE PARALAXE) ---
+            // NUNCA USE ROTATE AQUI PARA JOGOS 2D PSEUDO-3D
+            
+            const carX = cx + (d.x * w * 0.25);
             const carY = h * 0.85;
-            const carScale = w * 0.0035;
-
-            ctx.save(); 
-            ctx.translate(carX, carY); 
+            const s = w * 0.004; // Escala do carro
             
-            // --- CORREÇÃO: ROTAÇÃO REMOVIDA PARA NÃO TOMBAR ---
-            // ctx.rotate(...) foi apagado aqui.
-            
-            ctx.scale(carScale, carScale);
+            // O segredo: 'turn' define o quanto deslocamos os elementos para o lado
+            // em vez de girar o carro todo.
+            const turn = d.steer * 20; 
 
-            // 1. Sombra
+            ctx.save();
+            ctx.translate(carX, carY);
+            ctx.scale(s, s);
+
+            // Sombra (Sempre fixa no chão)
             ctx.fillStyle = 'rgba(0,0,0,0.4)';
-            ctx.beginPath(); ctx.ellipse(0, 15, 40, 15, 0, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(0, 15, 35, 12, 0, 0, Math.PI*2); ctx.fill();
 
-            // ILUSÃO DE ÓTICA PARA CURVA (PARALAXE)
-            // turnOffset desloca os elementos para simular o giro 3D
-            const turnOffset = this.st * 25; // Aumentei um pouco para realçar o efeito visual
-
-            // 2. Rodas Traseiras (Fixas)
+            // Pneus Traseiros (Fixos)
             ctx.fillStyle = '#222';
-            ctx.fillRect(-35 + (turnOffset*0.5), 5, 15, 20); // Esq
-            ctx.fillRect(20 + (turnOffset*0.5), 5, 15, 20);  // Dir
+            ctx.fillRect(-30, 0, 12, 18);
+            ctx.fillRect(18, 0, 12, 18);
 
-            // 3. Chassi (Corpo)
-            ctx.fillStyle = '#cc0000'; // Vermelho
-            ctx.beginPath();
-            ctx.roundRect(-25, -20, 50, 45, 5); 
-            ctx.fill();
+            // Chassi (Corpo vermelho)
+            ctx.fillStyle = '#d32f2f';
+            ctx.beginPath(); ctx.roundRect(-22, -20, 44, 45, 6); ctx.fill();
+
+            // Motor (Detalhe cinza)
+            ctx.fillStyle = '#444'; ctx.fillRect(-12, 20, 24, 8);
+
+            // Pneus Dianteiros (Estes se movem com o 'turn' para dar efeito de curva)
+            ctx.fillStyle = '#222';
+            // Note o "+ turn": desloca o pneu visualmente
+            ctx.fillRect(-28 + turn, -22, 10, 14); 
+            ctx.fillRect(18 + turn, -22, 10, 14);
+
+            // Capacete do Piloto (Move um pouco menos que os pneus)
+            ctx.fillStyle = '#ffeb3b'; // Amarelo
+            ctx.beginPath(); ctx.arc(turn * 0.5, -5, 11, 0, Math.PI*2); ctx.fill();
             
-            // Faixa Racing
-            ctx.fillStyle = '#fff';
-            ctx.fillRect(-5 + (turnOffset*0.2), -20, 10, 45);
+            // Detalhe do Capacete
+            ctx.fillStyle = '#d32f2f'; 
+            ctx.beginPath(); ctx.arc(turn * 0.5, -5, 4, 0, Math.PI*2); ctx.fill();
 
-            // 4. Rodas Dianteiras (Giram muito)
-            ctx.fillStyle = '#222';
-            ctx.fillRect(-30 + (turnOffset*1.5), -25, 12, 16); 
-            ctx.fillRect(18 + (turnOffset*1.5), -25, 12, 16);
-
-            // 5. Motor
-            ctx.fillStyle = '#444';
-            ctx.fillRect(-15 + (turnOffset*0.5), 25, 30, 8);
-            ctx.fillStyle = '#111';
-            ctx.beginPath(); ctx.arc(-10 + (turnOffset*0.5), 30, 4, 0, Math.PI*2); ctx.fill();
-            ctx.beginPath(); ctx.arc(10 + (turnOffset*0.5), 30, 4, 0, Math.PI*2); ctx.fill();
-
-            // 6. Cabeça do Piloto (Inclina na curva)
-            ctx.fillStyle = '#ffcc99'; // Pele
-            ctx.beginPath(); ctx.arc(turnOffset, -10, 10, 0, Math.PI*2); ctx.fill();
-            // Capacete
-            ctx.fillStyle = '#e60000';
-            ctx.beginPath(); ctx.arc(turnOffset, -12, 11, 0, Math.PI*2); ctx.fill();
-            // Visor
-            ctx.fillStyle = '#333';
-            ctx.fillRect(turnOffset - 8, -12, 16, 6);
-
-            // 7. Volante do Kart
-            ctx.strokeStyle = '#333';
-            ctx.lineWidth = 3;
-            ctx.beginPath(); 
-            ctx.moveTo(-8 + (turnOffset*1.8), -15); 
-            ctx.lineTo(8 + (turnOffset*1.8), -15); 
-            ctx.stroke();
+            // Volante (Preto, acompanha o piloto)
+            ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(-8 + turn, -12); ctx.lineTo(8 + turn, -12); ctx.stroke();
 
             ctx.restore();
 
-            return Math.floor(this.p / 100);
+            // --- 5. LUVAS (DESENHADAS POR CIMA - FORA DO RESTORE) ---
+            if(window.Gfx && window.Gfx.drawSteeringHands) {
+                window.Gfx.drawSteeringHands(ctx, pose, w, h);
+            }
+
+            return Math.floor(d.pos/100);
         }
     };
 
     // REGISTRO
-    const regLoop = setInterval(() => {
-        if(window.System && window.System.registerGame) {
-            window.System.registerGame('drive', 'Kart do Otto', '🏎️', Logic, {camOpacity: 0.5, showWheel: true});
-            clearInterval(regLoop);
-        }
-    }, 100);
+    if(window.System) {
+        window.System.registerGame('drive', 'Kart do Otto', '🏎️', Logic, {camOpacity: 0.5, showWheel: true});
+    }
 })();
