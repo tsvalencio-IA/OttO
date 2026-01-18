@@ -1,5 +1,5 @@
 /* =================================================================
-   CORE DO SISTEMA (CÉREBRO)
+   CORE DO SISTEMA (CÉREBRO) - VERSÃO FINAL COM LUVAS
    ================================================================= */
 
 // 1. AUDIO GLOBAL
@@ -21,30 +21,46 @@ window.Sfx = {
     skid: () => window.Sfx.play(60,'sawtooth',0.2,0.2)
 };
 
-// 2. GRÁFICOS GLOBAIS
+// 2. GRÁFICOS GLOBAIS (COM AS LUVAS)
 window.Gfx = {
     map: (p,w,h) => ({x:w-(p.x/640*w), y:p.y/480*h}),
     
-    // Desenha Mãos (Volante)
+    // --- LUVAS DE PILOTO (KART) ---
     drawSteeringHands: (ctx, pose, w, h) => {
         if(!pose) return;
         const kp=pose.keypoints, lw=kp.find(k=>k.name==='left_wrist'), rw=kp.find(k=>k.name==='right_wrist');
+        
+        // Só desenha se tiver confiança
         if(lw&&rw&&lw.score>0.3&&rw.score>0.3){
             const p1=window.Gfx.map(lw,w,h), p2=window.Gfx.map(rw,w,h);
+            
+            // Eixo do Volante (Linha Verde)
             ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y);
-            ctx.strokeStyle='rgba(0,255,0,0.8)'; ctx.lineWidth=4; ctx.setLineDash([10,10]); ctx.stroke(); ctx.setLineDash([]);
-            const r=w*0.05;
-            ctx.fillStyle='rgba(255,0,0,0.8)'; ctx.beginPath(); ctx.arc(p1.x,p1.y,r,0,Math.PI*2); ctx.fill();
-            ctx.fillStyle="#fff"; ctx.font="bold 12px sans-serif"; ctx.textAlign="center"; ctx.fillText("L",p1.x,p1.y+4);
-            ctx.fillStyle='rgba(255,0,0,0.8)'; ctx.beginPath(); ctx.arc(p2.x,p2.y,r,0,Math.PI*2); ctx.fill();
-            ctx.fillStyle="#fff"; ctx.fillText("R",p2.x,p2.y+4);
+            ctx.strokeStyle='rgba(0,255,0,0.5)'; ctx.lineWidth=4; ctx.setLineDash([10,10]); ctx.stroke(); ctx.setLineDash([]);
+            
+            // LUVAS VERMELHAS (Grandes e Visíveis)
+            const r=w*0.06; // Tamanho da luva
+            
+            // Esquerda
+            ctx.fillStyle='#ff0000'; ctx.beginPath(); ctx.arc(p1.x,p1.y,r,0,Math.PI*2); ctx.fill();
+            ctx.lineWidth=3; ctx.strokeStyle='#fff'; ctx.stroke();
+            ctx.fillStyle="#fff"; ctx.font="bold 16px Arial"; ctx.textAlign="center"; ctx.fillText("L",p1.x,p1.y+6);
+
+            // Direita
+            ctx.fillStyle='#ff0000'; ctx.beginPath(); ctx.arc(p2.x,p2.y,r,0,Math.PI*2); ctx.fill();
+            ctx.lineWidth=3; ctx.strokeStyle='#fff'; ctx.stroke();
+            ctx.fillStyle="#fff"; ctx.fillText("R",p2.x,p2.y+6);
         }
     },
-    // Desenha Esqueleto (Boxe)
+
+    // --- ESQUELETO + LUVAS DE BOXE ---
     drawSkeleton: (ctx, pose, w, h) => {
         if(!pose) return;
-        ctx.lineCap='round'; ctx.strokeStyle='#00ffff'; ctx.lineWidth=w*0.015;
+        ctx.lineCap='round'; ctx.strokeStyle='#00ffff'; ctx.lineWidth=w*0.01;
+        
         const kp=pose.keypoints; const get=n=>kp.find(k=>k.name===n);
+        
+        // Desenha Ossos
         const bone=(n1,n2)=>{
             const p1=get(n1), p2=get(n2);
             if(p1&&p2&&p1.score>0.3&&p2.score>0.3){
@@ -55,6 +71,20 @@ window.Gfx = {
         bone('left_shoulder','left_elbow'); bone('left_elbow','left_wrist');
         bone('right_shoulder','right_elbow'); bone('right_elbow','right_wrist');
         bone('left_shoulder','right_shoulder');
+
+        // LUVAS DE BOXE (GIGANTES)
+        const lw=get('left_wrist'), rw=get('right_wrist'), s=w*0.09; // Luva maior que a do carro
+        
+        if(lw&&lw.score>0.3){
+            const p=window.Gfx.map(lw,w,h); 
+            ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(p.x,p.y,s,0,Math.PI*2); ctx.fill();
+            ctx.strokeStyle='white'; ctx.lineWidth=4; ctx.stroke();
+        }
+        if(rw&&rw.score>0.3){
+            const p=window.Gfx.map(rw,w,h); 
+            ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(p.x,p.y,s,0,Math.PI*2); ctx.fill();
+            ctx.strokeStyle='white'; ctx.lineWidth=4; ctx.stroke();
+        }
     }
 };
 
@@ -63,10 +93,9 @@ window.System = {
     video:null, canvas:null, ctx:null, detector:null,
     activeGame:null, loopId:null, sens:1.0, games:{},
 
-    // FUNÇÃO CRÍTICA: REGISTRO DE JOGOS
     registerGame: (id, name, icon, logicObj, settings={camOpacity:0.3, showWheel:false}) => {
         window.System.games[id] = { name:name, icon:icon, logic:logicObj, sets:settings };
-        console.log("Jogo Registrado:", name); // Log para debug
+        console.log("Jogo Registrado:", name);
     },
 
     boot: async () => {
@@ -87,7 +116,7 @@ window.System = {
             window.System.resize(); window.addEventListener('resize',window.System.resize);
 
             document.getElementById('screen-load').classList.add('hidden');
-            window.System.renderMenu(); // Renderiza APÓS carregar tudo
+            window.System.renderMenu();
             window.System.menu();
         } catch(e){ alert("Erro Câmera: " + e.message); }
     },
@@ -95,17 +124,12 @@ window.System = {
     renderMenu: () => {
         const grid = document.getElementById('channel-grid'); grid.innerHTML='';
         const keys = Object.keys(window.System.games);
-        
-        // Se não tiver jogos, avisa no console
-        if(keys.length === 0) console.warn("Nenhum jogo encontrado!");
-
         for(const id of keys){
             const g = window.System.games[id];
             const d=document.createElement('div'); d.className='channel'; d.onclick=()=>window.System.launch(id);
             d.innerHTML=`<div class="channel-icon">${g.icon}</div><div class="channel-name">${g.name}</div>`;
             grid.appendChild(d);
         }
-        // Preenche slots vazios
         for(let i=0; i < (4 - keys.length); i++) grid.innerHTML+=`<div class="channel channel-empty"></div>`;
     },
 
