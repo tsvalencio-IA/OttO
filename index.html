@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>thIAguinho Wii: MODULAR OS</title>
+    <title>thIAguinho Wii: OTTO EDITION</title>
     
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
@@ -19,15 +19,17 @@
         :root { --wii-bg: #e6e6e6; --wii-highlight: #68c9e6; }
         body { background-color: #000; margin: 0; padding: 0; overflow: hidden; font-family: 'Roboto', sans-serif; touch-action: none; user-select: none; width: 100vw; height: 100dvh; }
         
-        /* LAYERS */
-        #os-layer { position: relative; width: 100%; height: 100%; background: transparent; pointer-events: none; z-index: 50; }
+        /* CAMADAS */
         #game-hardware { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; background: #000; }
+        #os-layer { position: relative; width: 100%; height: 100%; background: transparent; pointer-events: none; z-index: 50; }
+        
+        /* HARDWARE */
         #video-source { display: none; }
         #webcam { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0; transition: opacity 0.5s; }
         #game-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
         
-        /* SCREENS */
-        .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--wii-bg); pointer-events: auto; transition: opacity 0.3s, transform 0.3s; }
+        /* UI GERAL */
+        .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--wii-bg); pointer-events: auto; transition: opacity 0.3s; }
         .hidden { opacity: 0; pointer-events: none; z-index: -1; }
 
         /* MENU GRID */
@@ -39,13 +41,18 @@
         .channel:active { transform: scale(0.95); border-color: var(--wii-highlight); }
         .channel-icon { font-size: clamp(2rem, 5vw, 4rem); margin-bottom: 5px; }
         .channel-name { font-size: clamp(0.6rem, 2vw, 0.9rem); color: #888; text-transform: uppercase; font-weight: bold; }
+        .channel-empty { background: #eee; } /* Diferente do branco para ver slots vazios */
         
-        /* UI ELEMENTS */
+        /* BARRA INFERIOR */
         .bottom-bar { position: absolute; bottom: 0; width: 100%; height: 12%; background: #cdcdcd; border-top: 2px solid #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; box-sizing: border-box; }
         .wii-btn-round { width: 40px; height: 40px; background: #eee; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #aaa; color: #888; font-weight: bold; font-size: 0.8rem; }
+        
+        /* HUD IN-GAME */
+        #game-ui { pointer-events: none; }
+        .hud-element { pointer-events: auto; }
         #hud-score { font-family: 'Russo One', sans-serif; text-shadow: 2px 2px 0 #000; }
         
-        /* VOLANTE VISUAL */
+        /* VOLANTE */
         #ui-wheel { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 20; }
         .steering-wheel { width: 140px; height: 140px; border: 8px solid #ccc; border-radius: 50%; background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.8) 41%); box-shadow: 0 0 20px rgba(0,0,0,0.5), inset 0 0 10px rgba(0,0,0,0.8); position: relative; transition: transform 0.1s; }
         .wheel-center-mark { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); width: 10px; height: 20px; background: red; border-radius: 2px; box-shadow: 0 0 5px red; }
@@ -62,24 +69,25 @@
 </div>
 
 <div id="os-layer">
-    <div id="screen-safety" class="screen">
+    
+    <div id="screen-safety" class="screen" style="z-index: 100;">
         <div style="border:1px solid #ccc; padding:2rem; width:90%; max-width:600px; background:#fff; border-radius:8px; text-align:center;">
             <h1 class="text-xl md:text-2xl font-bold mb-4">Saúde e Segurança</h1>
-            <p class="mb-6 text-sm text-gray-600">⚠️ Mantenha distância da tela e certifique-se de ter espaço.</p>
+            <p class="mb-6 text-sm text-gray-600">⚠️ Certifique-se de ter espaço livre ao seu redor.</p>
             <button onclick="System.boot()" class="btn-action text-lg animate-pulse">Tocar para Iniciar (A)</button>
-            <div id="boot-log" class="mt-4 text-xs text-cyan-500 font-mono h-4"></div>
+            <div id="boot-log" class="mt-4 text-xs text-blue-500 font-mono h-4"></div>
         </div>
     </div>
 
     <div id="screen-load" class="screen hidden" style="background:#000; color:#fff;">
         <div class="w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p class="font-mono text-sm">CARREGANDO SISTEMA...</p>
+        <p class="font-mono text-xs">CARREGANDO SISTEMA...</p>
     </div>
 
     <div id="screen-menu" class="screen hidden">
         <div class="wii-grid" id="channel-grid">
             </div>
-        <div class="bottom-bar justify-between">
+        <div class="bottom-bar">
             <div class="wii-btn-round">Otto</div>
             <div class="text-gray-500 font-bold text-sm tracking-widest">MENU</div>
             <div id="clock" class="text-gray-600 font-bold text-lg">00:00</div>
@@ -87,39 +95,322 @@
     </div>
 
     <div id="game-ui" class="screen hidden" style="background: transparent;">
-        <button onclick="System.home()" style="position:absolute; top:1rem; right:1rem; background:rgba(59,130,246,0.8); color:white; width:2.5rem; height:2.5rem; border-radius:9999px; border:2px solid white; font-weight:bold; font-size:0.75rem; pointer-events:auto;">⌂</button>
-        <div style="position:absolute; bottom:1rem; left:1rem; background:rgba(0,0,0,0.6); padding:0.5rem 1rem; border-radius:9999px; border:1px solid rgba(255,255,255,0.3);">
-            <span style="font-size:0.6rem; color:#67e8f9; display:block; line-height:1;">SCORE</span>
+        <button onclick="System.home()" class="hud-element" style="position:absolute; top:1rem; right:1rem; background:rgba(59,130,246,0.8); color:white; width:2.5rem; height:2.5rem; border-radius:50%; border:2px solid white; font-weight:bold; display:flex; align-items:center; justify-content:center;">⌂</button>
+        
+        <div style="position:absolute; bottom:1rem; left:1rem; background:rgba(0,0,0,0.6); padding:0.5rem 1rem; border-radius:2rem; border:1px solid rgba(255,255,255,0.3);">
+            <span style="font-size:0.6rem; color:#67e8f9; display:block;">SCORE</span>
             <div id="hud-score" style="font-size:1.5rem; color:white; line-height:1;">0</div>
         </div>
-        <div id="game-msg" style="position:absolute; top:33%; width:100%; text-align:center; font-size:3rem; color:#facc15; font-weight:900; text-shadow:2px 2px 0 #000;"></div>
-        
-        <div id="ui-wheel">
-            <div id="visual-wheel" class="steering-wheel">
-                <div class="wheel-center-mark"></div><div class="wheel-spoke"></div>
-            </div>
-        </div>
 
-        <div style="position:absolute; bottom:1rem; right:5rem; background:rgba(0,0,0,0.5); padding:0.5rem; border-radius:9999px; pointer-events:auto; display:flex; align-items:center; gap:0.5rem;">
+        <div id="game-msg" style="position:absolute; top:30%; width:100%; text-align:center; font-size:3rem; color:#facc15; font-weight:900; text-shadow:2px 2px 0 #000;"></div>
+
+        <div id="ui-wheel">
+            <div class="steering-wheel"><div class="wheel-center-mark"></div></div>
+        </div>
+        
+        <div class="hud-element" style="position:absolute; bottom:1rem; right:5rem; background:rgba(0,0,0,0.5); padding:0.5rem; border-radius:2rem; display:flex; align-items:center; gap:0.5rem;">
             <span style="font-size:0.6rem; color:white;">SENS</span>
             <input type="range" min="0.5" max="3.0" step="0.5" value="1.0" style="width:5rem;" oninput="System.setSens(this.value)">
         </div>
     </div>
 
-    <div id="screen-over" class="screen hidden" style="background: rgba(255,255,255,0.95); z-index: 60;">
-        <h1 class="text-5xl text-gray-800 font-black mb-2">FIM</h1>
-        <div class="text-xl text-cyan-600 font-bold">PONTUAÇÃO</div>
-        <div id="final-score" class="text-7xl text-gray-800 font-bold mb-8 font-mono">0</div>
+    <div id="screen-over" class="screen hidden" style="background:rgba(255,255,255,0.95); z-index:60;">
+        <h1 class="text-5xl font-black mb-2">FIM</h1>
+        <div id="final-score" class="text-7xl font-bold mb-8 font-mono">0</div>
         <button onclick="System.menu()" class="btn-action">VOLTAR AO MENU</button>
     </div>
 </div>
 
-<script src="js/core.js"></script> <script src="js/game_kart.js"></script> <script src="js/game_run.js"></script>  <script src="js/game_box.js"></script>  <script>
-    // Inicia o relógio
-    setInterval(() => {
-        document.getElementById('clock').innerText = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-    }, 1000);
-</script>
+<script>
+/**
+ * ====================================================================
+ * 🧠 NÚCLEO DO SISTEMA (CORE + GAMES)
+ * ====================================================================
+ */
 
+// --- 1. AUDIO ---
+const Sfx = {
+    ctx: null,
+    init: () => { window.AudioContext = window.AudioContext||window.webkitAudioContext; Sfx.ctx=new AudioContext(); },
+    play: (f,t,d,v=0.1) => {
+        if(!Sfx.ctx)return;
+        const o=Sfx.ctx.createOscillator(),g=Sfx.ctx.createGain();
+        o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,Sfx.ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.01,Sfx.ctx.currentTime+d);
+        o.connect(g);g.connect(Sfx.ctx.destination);o.start();o.stop(Sfx.ctx.currentTime+d);
+    },
+    click:()=>Sfx.play(1200,'sine',0.1,0.1),
+    coin:()=>Sfx.play(1500,'square',0.1,0.05),
+    crash:()=>Sfx.play(80,'sawtooth',0.5,0.4),
+    hit:()=>Sfx.play(150,'sawtooth',0.1,0.2),
+    skid:()=>Sfx.play(60,'sawtooth',0.2,0.2)
+};
+
+// --- 2. GRÁFICOS ---
+const Gfx = {
+    map: (p,w,h) => ({x:w-(p.x/640*w), y:p.y/480*h}),
+    
+    // Mãos no Volante
+    drawHands: (ctx, pose, w, h) => {
+        if(!pose) return;
+        const kp=pose.keypoints, lw=kp.find(k=>k.name==='left_wrist'), rw=kp.find(k=>k.name==='right_wrist');
+        if(lw&&rw&&lw.score>0.3&&rw.score>0.3){
+            const p1=Gfx.map(lw,w,h), p2=Gfx.map(rw,w,h);
+            ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y);
+            ctx.strokeStyle='rgba(0,255,0,0.8)'; ctx.lineWidth=4; ctx.setLineDash([10,10]); ctx.stroke(); ctx.setLineDash([]);
+            const r=w*0.05;
+            ctx.fillStyle='rgba(255,0,0,0.8)'; ctx.beginPath(); ctx.arc(p1.x,p1.y,r,0,Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(p2.x,p2.y,r,0,Math.PI*2); ctx.fill();
+            ctx.fillStyle='#fff'; ctx.font="bold 12px sans-serif"; ctx.textAlign="center";
+            ctx.fillText("L",p1.x,p1.y+4); ctx.fillText("R",p2.x,p2.y+4);
+        }
+    },
+    // Esqueleto Boxe
+    drawSkel: (ctx, pose, w, h) => {
+        if(!pose) return;
+        ctx.lineCap='round'; ctx.strokeStyle='#00ffff'; ctx.lineWidth=w*0.015;
+        const kp=pose.keypoints; const get=n=>kp.find(k=>k.name===n);
+        const bone=(n1,n2)=>{
+            const p1=get(n1), p2=get(n2);
+            if(p1&&p2&&p1.score>0.3&&p2.score>0.3){
+                const m1=Gfx.map(p1,w,h), m2=Gfx.map(p2,w,h);
+                ctx.beginPath(); ctx.moveTo(m1.x,m1.y); ctx.lineTo(m2.x,m2.y); ctx.stroke();
+            }
+        };
+        bone('left_shoulder','left_elbow'); bone('left_elbow','left_wrist');
+        bone('right_shoulder','right_elbow'); bone('right_elbow','right_wrist');
+        bone('left_shoulder','right_shoulder');
+        // Luvas
+        const lw=get('left_wrist'), rw=get('right_wrist'), s=w*0.08;
+        if(lw&&lw.score>0.3){const p=Gfx.map(lw,w,h); ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(p.x,p.y,s,0,Math.PI*2); ctx.fill();}
+        if(rw&&rw.score>0.3){const p=Gfx.map(rw,w,h); ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(p.x,p.y,s,0,Math.PI*2); ctx.fill();}
+    }
+};
+
+// --- 3. SISTEMA ---
+const System = {
+    video:null, canvas:null, ctx:null, detector:null,
+    activeGame:null, loopId:null, sens:1.0, games:{},
+
+    reg: (id, name, icon, logic, sets={cam:0.3, wheel:false}) => {
+        System.games[id] = {name, icon, logic, sets};
+    },
+
+    boot: async () => {
+        document.getElementById('boot-log').innerText="Iniciando...";
+        Sfx.init(); Sfx.click();
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});
+            System.video=document.getElementById('video-source'); System.video.srcObject=stream;
+            document.getElementById('webcam').srcObject=stream;
+            await new Promise(r=>System.video.onloadedmetadata=r); System.video.play(); document.getElementById('webcam').play();
+            
+            document.getElementById('screen-safety').classList.add('hidden');
+            document.getElementById('screen-load').classList.remove('hidden');
+
+            await tf.setBackend('webgl');
+            System.detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {modelType:poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING});
+
+            System.canvas=document.getElementById('game-canvas'); System.ctx=System.canvas.getContext('2d');
+            System.resize(); window.addEventListener('resize',System.resize);
+
+            document.getElementById('screen-load').classList.add('hidden');
+            System.renderMenu();
+            System.menu();
+        } catch(e){ alert("Erro: Câmera não permitida!"); }
+    },
+
+    renderMenu: () => {
+        const grid = document.getElementById('channel-grid'); grid.innerHTML='';
+        for(const [id, g] of Object.entries(System.games)){
+            const d=document.createElement('div'); d.className='channel'; d.onclick=()=>System.launch(id);
+            d.innerHTML=`<div class="channel-icon">${g.icon}</div><div class="channel-name">${g.name}</div>`;
+            grid.appendChild(d);
+        }
+        for(let i=0; i<4; i++) grid.innerHTML+=`<div class="channel channel-empty"></div>`;
+    },
+
+    menu: () => {
+        System.stop();
+        document.getElementById('screen-menu').classList.remove('hidden');
+        document.getElementById('screen-over').classList.add('hidden');
+        document.getElementById('game-ui').classList.add('hidden');
+        document.getElementById('webcam').style.opacity='0';
+    },
+
+    launch: (id) => {
+        Sfx.click();
+        const g = System.games[id]; if(!g) return;
+        System.activeGame = g;
+        document.getElementById('screen-menu').classList.add('hidden');
+        document.getElementById('game-ui').classList.remove('hidden');
+        document.getElementById('webcam').style.opacity = g.sets.cam;
+        document.getElementById('ui-wheel').style.opacity = g.sets.wheel ? '1':'0';
+        g.logic.init();
+        System.loop();
+    },
+
+    loop: async () => {
+        if(!System.activeGame) return;
+        const ctx=System.ctx, w=System.canvas.width, h=System.canvas.height;
+        let pose=null;
+        try{ const p=await System.detector.estimatePoses(System.video,{flipHorizontal:false}); if(p.length>0) pose=p[0]; }catch(e){}
+        const s = System.activeGame.logic.update(ctx, w, h, pose);
+        document.getElementById('hud-score').innerText=s;
+        System.loopId = requestAnimationFrame(System.loop);
+    },
+
+    stop: () => { System.activeGame=null; if(System.loopId) cancelAnimationFrame(System.loopId); },
+    home: () => { Sfx.click(); System.menu(); },
+    gameOver: (s) => { System.stop(); Sfx.crash(); document.getElementById('final-score').innerText=s; document.getElementById('game-ui').classList.add('hidden'); document.getElementById('screen-over').classList.remove('hidden'); },
+    resize: () => { if(System.canvas){System.canvas.width=window.innerWidth; System.canvas.height=window.innerHeight;} },
+    setSens: (v) => System.sens=parseFloat(v),
+    msg: (t) => { const el=document.getElementById('game-msg'); el.innerText=t; setTimeout(()=>el.innerText='',1500); }
+};
+
+// --- 4. JOGOS (REGISTRO) ---
+
+// JOGO 1: KART
+System.reg('drive', 'Kart do Otto', '🏎️', {
+    s:0, p:0, x:0, st:0, c:0, obs:[],
+    init: function(){ this.s=0; this.p=0; this.x=0; this.obs=[]; System.msg("SEGURE O VOLANTE!"); },
+    update: function(ctx, w, h, pose){
+        const cx=w/2; let ang=0;
+        // Input
+        if(pose){
+            const kp=pose.keypoints, lw=kp.find(k=>k.name==='left_wrist'), rw=kp.find(k=>k.name==='right_wrist');
+            if(lw&&rw&&lw.score>0.3&&rw.score>0.3){
+                const dy=rw.y-lw.y, dx=rw.x-lw.x;
+                ang=Math.atan2(dy,dx)*1.5*System.sens;
+                if(this.s<h*0.05) this.s+=h*0.0005;
+            } else { this.s*=0.95; }
+        }
+        this.st+=(ang-this.st)*0.2;
+        const wheel=document.getElementById('visual-wheel'); if(wheel) wheel.style.transform=`rotate(${this.st*57}deg)`;
+        
+        // Física
+        this.p+=this.s; this.c=Math.sin(this.p*0.005)*1.5;
+        this.x+=this.st*(this.s/(h*0.5)); this.x-=this.c*(this.s/h);
+        if(Math.abs(this.x)>1.3) this.s*=0.9;
+        
+        // Obstáculos
+        if(Math.random()<0.02 && this.s>5) this.obs.push({x:(Math.random()*2)-1, z:1000});
+
+        // Desenho
+        ctx.fillStyle='#111'; ctx.fillRect(0,0,w,h);
+        const hor=h*0.4;
+        ctx.strokeStyle='#00ffcc'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,hor); ctx.lineTo(w,hor); ctx.stroke();
+        ctx.fillStyle='#333'; ctx.beginPath();
+        const topW=w*0.05, botW=w*1.2, off=this.c*(w*0.3);
+        ctx.moveTo(cx+off-topW, hor); ctx.lineTo(cx+off+topW, hor); ctx.lineTo(cx+botW, h); ctx.lineTo(cx-botW, h); ctx.fill();
+        ctx.strokeStyle='#ffeb3b'; ctx.lineWidth=w*0.02; ctx.setLineDash([h*0.05, h*0.05]); ctx.lineDashOffset=-this.p;
+        ctx.beginPath(); ctx.moveTo(cx+off, hor); ctx.quadraticCurveTo(cx+(off*0.5), h*0.7, cx, h); ctx.stroke(); ctx.setLineDash([]);
+
+        this.obs.forEach((o,i)=>{
+            o.z-=this.s*2; if(o.z<-100){this.obs.splice(i,1); return;}
+            const sc=500/(o.z+100);
+            if(sc>0 && o.z<1000){
+                const ox=cx+(this.c*(w*0.3)*(1-(o.z/1000)))+(o.x*w*0.5*sc);
+                const oy=(h*0.4)+(50*sc), sz=(w*0.08)*sc;
+                ctx.fillStyle='#ff9900'; ctx.beginPath(); ctx.moveTo(ox,oy-sz); ctx.lineTo(ox-sz/2,oy); ctx.lineTo(ox+sz/2,oy); ctx.fill();
+                if(o.z<100 && o.z>0 && Math.abs(this.x-o.x)<0.3){
+                    this.s*=0.5; Sfx.skid(); this.obs.splice(i,1); ctx.fillStyle='rgba(255,0,0,0.5)'; ctx.fillRect(0,0,w,h);
+                }
+            }
+        });
+
+        const carX=cx+(this.x*w*0.25);
+        ctx.save(); ctx.translate(carX, h*0.85); ctx.rotate(this.st); const s=w*0.003; ctx.scale(s,s);
+        ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(-25,-10,50,40);
+        ctx.fillStyle='#ff0033'; ctx.beginPath(); ctx.roundRect(-20,-20,40,40,5); ctx.fill();
+        ctx.fillStyle='#111'; ctx.fillRect(-15,-10,30,10);
+        ctx.restore();
+
+        Gfx.drawHands(ctx, pose, w, h);
+        return Math.floor(this.p/100);
+    }
+}, {cam:0.5, wheel:true});
+
+// JOGO 2: RUN
+System.reg('run', 'Otto Runner', '🏃', {
+    lane:0, sc:0, f:0, obs:[],
+    init: function(){ this.sc=0; this.obs=[]; System.msg("CORRA!"); },
+    update: function(ctx, w, h, pose){
+        const cx=w/2; this.f++;
+        if(pose){
+            const n=pose.keypoints.find(k=>k.name==='nose');
+            if(n&&n.score>0.4){ if(n.x<210)this.lane=1; else if(n.x>430)this.lane=-1; else this.lane=0; }
+        }
+        if(this.f%50===0) this.obs.push({l:Math.floor(Math.random()*3)-1, z:1000});
+        
+        ctx.clearRect(0,0,w,h); ctx.fillStyle='#111'; ctx.fillRect(0,0,w,h);
+        ctx.strokeStyle='#00ffcc'; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(cx-(w*0.3), h/2); ctx.lineTo(0,h); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx+(w*0.3), h/2); ctx.lineTo(w,h); ctx.stroke();
+
+        this.obs.forEach((o,i)=>{
+            o.z-=20; if(o.z<-100){this.obs.splice(i,1); this.sc+=10; Sfx.coin(); return;}
+            const sc=500/(o.z+100);
+            if(sc>0){
+                const ox=cx+(o.l*w*0.3*sc), oy=h/2+(50*sc), sz=w*0.15*sc;
+                ctx.fillStyle='#f03'; ctx.fillRect(ox-sz/2, oy, sz, sz);
+                if(o.z<50 && o.z>-50 && o.l===this.lane) System.gameOver(this.sc);
+            }
+        });
+        
+        ctx.save(); ctx.translate(cx+(this.lane*w*0.25), h*0.85); const ps=w*0.005; ctx.scale(ps,ps);
+        ctx.strokeStyle='#0f0'; ctx.lineWidth=3; ctx.lineCap='round';
+        const osc=Math.sin(this.f*0.5)*10;
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,-15); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-8+osc,20); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(8-osc,20); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,-12); ctx.lineTo(-10-osc,-5); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,-12); ctx.lineTo(10+osc,-5); ctx.stroke();
+        ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(0,-22,5,0,Math.PI*2); ctx.fill();
+        ctx.restore();
+        return this.sc;
+    }
+}, {cam:0.3, wheel:false});
+
+// JOGO 3: BOXE
+System.reg('fight', 'Otto Boxing', '🥊', {
+    sc:0, tg:[], last:0,
+    init: function(){ this.sc=0; this.tg=[]; System.msg("BOXE!"); },
+    update: function(ctx, w, h, pose){
+        const now=Date.now();
+        ctx.clearRect(0,0,w,h); Gfx.drawSkel(ctx, pose, w, h);
+        let hits=[];
+        if(pose){
+            const kp=pose.keypoints, lw=kp.find(k=>k.name==='left_wrist'), rw=kp.find(k=>k.name==='right_wrist');
+            if(lw&&lw.score>0.3) hits.push(Gfx.map(lw,w,h));
+            if(rw&&rw.score>0.3) hits.push(Gfx.map(rw,w,h));
+        }
+        if(now-this.last>800){
+            this.tg.push({x:Math.random()*(w*0.8)+w*0.1, y:Math.random()*(h*0.5)+h*0.1, r:w*0.08, s:now});
+            this.last=now;
+        }
+        this.tg.forEach((t,i)=>{
+            const age=(now-t.s)/1500; if(age>1){this.tg.splice(i,1); return;}
+            ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI*2);
+            ctx.fillStyle=`rgba(255,255,0,${1-age})`; ctx.fill(); ctx.stroke();
+            hits.forEach(h=>{
+                if(Math.hypot(h.x-t.x, h.y-t.y)<t.r*1.5){
+                    this.tg.splice(i,1); this.sc+=100; Sfx.hit();
+                }
+            });
+        });
+        return this.sc;
+    }
+}, {cam:0.3, wheel:false});
+
+// CANAL EXTRA
+System.reg('mii', 'Otto Channel', '🙂', {
+    init: function(){ System.msg("EM BREVE"); setTimeout(()=>System.home(), 1000); },
+    update: function(){ return 0; }
+}, {cam:0, wheel:false});
+
+// START
+setInterval(()=>document.getElementById('clock').innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),1000);
+</script>
 </body>
 </html>
