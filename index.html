@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>thIAguinho Wii: MODULAR OS</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Russo+One&family=Roboto:wght@300;400;700&display=swap');
+
+        :root { --wii-bg: #e6e6e6; --wii-highlight: #68c9e6; }
+        body { background-color: #000; margin: 0; padding: 0; overflow: hidden; font-family: 'Roboto', sans-serif; touch-action: none; user-select: none; width: 100vw; height: 100dvh; }
+        
+        /* LAYERS */
+        #os-layer { position: relative; width: 100%; height: 100%; background: transparent; pointer-events: none; z-index: 50; }
+        #game-hardware { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; background: #000; }
+        #video-source { display: none; }
+        #webcam { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0; transition: opacity 0.5s; }
+        #game-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
+        
+        /* SCREENS */
+        .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--wii-bg); pointer-events: auto; transition: opacity 0.3s, transform 0.3s; }
+        .hidden { opacity: 0; pointer-events: none; z-index: -1; }
+
+        /* MENU GRID */
+        #screen-menu { background: linear-gradient(#f2f2f2, #d9d9d9); justify-content: flex-start; padding-top: 5vh; }
+        .wii-grid { display: grid; width: 95%; height: 70%; gap: 8px; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr); }
+        @media (min-width: 768px) { .wii-grid { width: 80%; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(3, 1fr); gap: 15px; } }
+        
+        .channel { background: #fff; border-radius: 12px; border: 1px solid #ccc; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; position: relative; overflow: hidden; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); transition: transform 0.1s; }
+        .channel:active { transform: scale(0.95); border-color: var(--wii-highlight); }
+        .channel-icon { font-size: clamp(2rem, 5vw, 4rem); margin-bottom: 5px; }
+        .channel-name { font-size: clamp(0.6rem, 2vw, 0.9rem); color: #888; text-transform: uppercase; font-weight: bold; }
+        
+        /* UI ELEMENTS */
+        .bottom-bar { position: absolute; bottom: 0; width: 100%; height: 12%; background: #cdcdcd; border-top: 2px solid #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; box-sizing: border-box; }
+        .wii-btn-round { width: 40px; height: 40px; background: #eee; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #aaa; color: #888; font-weight: bold; font-size: 0.8rem; }
+        #hud-score { font-family: 'Russo One', sans-serif; text-shadow: 2px 2px 0 #000; }
+        
+        /* VOLANTE VISUAL */
+        #ui-wheel { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 20; }
+        .steering-wheel { width: 140px; height: 140px; border: 8px solid #ccc; border-radius: 50%; background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.8) 41%); box-shadow: 0 0 20px rgba(0,0,0,0.5), inset 0 0 10px rgba(0,0,0,0.8); position: relative; transition: transform 0.1s; }
+        .wheel-center-mark { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); width: 10px; height: 20px; background: red; border-radius: 2px; box-shadow: 0 0 5px red; }
+        
+        .btn-action { background: linear-gradient(to bottom, #4facfe 0%, #00f2fe 100%); border: 2px solid white; color: white; padding: 15px 30px; border-radius: 50px; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+    </style>
+</head>
+<body>
+
+<div id="game-hardware">
+    <video id="video-source" playsinline></video>
+    <video id="webcam" autoplay muted playsinline></video>
+    <canvas id="game-canvas"></canvas>
+</div>
+
+<div id="os-layer">
+    <div id="screen-safety" class="screen">
+        <div style="border:1px solid #ccc; padding:2rem; width:90%; max-width:600px; background:#fff; border-radius:8px; text-align:center;">
+            <h1 class="text-xl md:text-2xl font-bold mb-4">Saúde e Segurança</h1>
+            <p class="mb-6 text-sm text-gray-600">⚠️ Mantenha distância da tela e certifique-se de ter espaço.</p>
+            <button onclick="System.boot()" class="btn-action text-lg animate-pulse">Tocar para Iniciar (A)</button>
+            <div id="boot-log" class="mt-4 text-xs text-cyan-500 font-mono h-4"></div>
+        </div>
+    </div>
+
+    <div id="screen-load" class="screen hidden" style="background:#000; color:#fff;">
+        <div class="w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p class="font-mono text-sm">CARREGANDO SISTEMA...</p>
+    </div>
+
+    <div id="screen-menu" class="screen hidden">
+        <div class="wii-grid" id="channel-grid">
+            </div>
+        <div class="bottom-bar justify-between">
+            <div class="wii-btn-round">Otto</div>
+            <div class="text-gray-500 font-bold text-sm tracking-widest">MENU</div>
+            <div id="clock" class="text-gray-600 font-bold text-lg">00:00</div>
+        </div>
+    </div>
+
+    <div id="game-ui" class="screen hidden" style="background: transparent;">
+        <button onclick="System.home()" style="position:absolute; top:1rem; right:1rem; background:rgba(59,130,246,0.8); color:white; width:2.5rem; height:2.5rem; border-radius:9999px; border:2px solid white; font-weight:bold; font-size:0.75rem; pointer-events:auto;">⌂</button>
+        <div style="position:absolute; bottom:1rem; left:1rem; background:rgba(0,0,0,0.6); padding:0.5rem 1rem; border-radius:9999px; border:1px solid rgba(255,255,255,0.3);">
+            <span style="font-size:0.6rem; color:#67e8f9; display:block; line-height:1;">SCORE</span>
+            <div id="hud-score" style="font-size:1.5rem; color:white; line-height:1;">0</div>
+        </div>
+        <div id="game-msg" style="position:absolute; top:33%; width:100%; text-align:center; font-size:3rem; color:#facc15; font-weight:900; text-shadow:2px 2px 0 #000;"></div>
+        
+        <div id="ui-wheel">
+            <div id="visual-wheel" class="steering-wheel">
+                <div class="wheel-center-mark"></div><div class="wheel-spoke"></div>
+            </div>
+        </div>
+
+        <div style="position:absolute; bottom:1rem; right:5rem; background:rgba(0,0,0,0.5); padding:0.5rem; border-radius:9999px; pointer-events:auto; display:flex; align-items:center; gap:0.5rem;">
+            <span style="font-size:0.6rem; color:white;">SENS</span>
+            <input type="range" min="0.5" max="3.0" step="0.5" value="1.0" style="width:5rem;" oninput="System.setSens(this.value)">
+        </div>
+    </div>
+
+    <div id="screen-over" class="screen hidden" style="background: rgba(255,255,255,0.95); z-index: 60;">
+        <h1 class="text-5xl text-gray-800 font-black mb-2">FIM</h1>
+        <div class="text-xl text-cyan-600 font-bold">PONTUAÇÃO</div>
+        <div id="final-score" class="text-7xl text-gray-800 font-bold mb-8 font-mono">0</div>
+        <button onclick="System.menu()" class="btn-action">VOLTAR AO MENU</button>
+    </div>
+</div>
+
+<script src="js/core.js"></script> <script src="js/game_kart.js"></script> <script src="js/game_run.js"></script>  <script src="js/game_box.js"></script>  <script>
+    // Inicia o relógio
+    setInterval(() => {
+        document.getElementById('clock').innerText = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    }, 1000);
+</script>
+
+</body>
+</html>
