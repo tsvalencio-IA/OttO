@@ -1,371 +1,480 @@
-// LÓGICA DO JOGO: KART DO OTTO (ULTIMATE PHYSICS EDITION)
+// LÓGICA DO JOGO: KART DO OTTO (ULTIMATE NINTENDO EDITION - SMART STEERING v2)
 (function() {
+    // Sistema de partículas para fumaça, terra e "speed lines"
+    let particles = [];
+    
     const Logic = {
-        // Variáveis de Física Avançada
+        // --- FÍSICA E ESTADO ---
         speed: 0, 
         pos: 0, 
-        x: 0,           // Posição lateral na pista
-        steer: 0,       // Direção atual (suavizada)
-        rawSteer: 0,    // Direção bruta (input direto)
+        x: 0,           // Posição lateral (-1.5 a 1.5)
+        steer: 0,       // Valor suavizado do volante (-1.6 a 1.6)
         curve: 0,       // Curvatura da pista
-        centrifugal: 0, // Força lateral
         
-        // Gameplay
-        health: 100,
-        maxHealth: 100,
-        score: 0,
+        // --- ATRIBUTOS DE JOGO ---
+        health: 100, 
+        score: 0, 
         
-        // Objetos
-        obs: [],
+        // --- EFEITOS VISUAIS ---
+        visualTilt: 0,  // Inclinação do chassi (Body Roll)
+        bounce: 0,      // Vibração do motor
+        
+        // --- ESTADO DO INPUT (PROGRESSIVO) ---
+        inputState: 0,  // 0=Nenhuma, 1=Uma Mão, 2=Duas Mãos (Volante)
+        hands: { left: null, right: null }, // Posições brutas para renderizar luvas
+        
+        wheel: {
+            radius: 0, x: 0, y: 0, opacity: 0, angle: 0
+        },
+        
+        // --- OBJETOS DO MUNDO ---
+        obs: [], 
         enemies: [],
         
         init: function() { 
             this.speed = 0; 
             this.pos = 0; 
             this.x = 0; 
-            this.health = 100;
+            this.steer = 0;
+            this.health = 100; 
             this.score = 0;
-            this.obs = [];
+            this.obs = []; 
             this.enemies = [];
-            window.System.msg("MODO SIMULAÇÃO ATIVO!"); 
+            particles = [];
+            this.inputState = 0;
+            
+            // Som de partida clássico estilo Mario Kart
+            window.System.msg("PREPARAR..."); 
+            window.Sfx.play(100, 'sawtooth', 0.5, 0.2); 
+            setTimeout(() => {
+                window.System.msg("VAI!");
+                window.Sfx.play(400, 'square', 1.0, 0.1);
+            }, 1500);
         },
         
         update: function(ctx, w, h, pose) {
             const d = Logic; 
             const cx = w / 2;
+            const horizon = h * 0.35; // Horizonte fixo (Referência MK Wii)
 
-            // --- 1. INPUT DE ALTA PRECISÃO ---
+            // =================================================================
+            // 1. DETECÇÃO DE MÃOS E ESTADOS (PROGRESSIVE INPUT SYSTEM)
+            // =================================================================
+            d.inputState = 0;
+            d.hands.left = null;
+            d.hands.right = null;
+
             let targetAngle = 0;
-            
+            // Razão de velocidade para ajustar a física (0.0 a 1.2)
+            const speedRatio = Math.min(1.2, d.speed / (h * 0.08));
+
             if(pose) {
                 const kp = pose.keypoints;
                 const lw = kp.find(k=>k.name==='left_wrist');
                 const rw = kp.find(k=>k.name==='right_wrist');
                 
-                if(lw && rw && lw.score > 0.4 && rw.score > 0.4) {
-                    const dy = rw.y - lw.y; 
-                    const dx = rw.x - lw.x;
-                    
-                    // Cálculo do Ângulo Bruto
-                    let rawAngle = Math.atan2(dy, dx);
-                    
-                    // APLICANDO DEADZONE (Zona Morta Central)
-                    // Evita que o carro trema em retas
-                    if(Math.abs(rawAngle) < 0.05) rawAngle = 0;
+                // Mapeia coordenadas se existirem
+                if(lw && lw.score > 0.4) d.hands.left = window.Gfx.map(lw, w, h);
+                if(rw && rw.score > 0.4) d.hands.right = window.Gfx.map(rw, w, h);
 
-                    // CURVA DE SENSIBILIDADE EXPONENCIAL
-                    // Pequenos movimentos = precisão. Grandes movimentos = curva rápida.
-                    // Math.sign mantém o lado (+ ou -)
-                    // Math.pow eleva ao quadrado para criar a curva de aceleração da direção
-                    targetAngle = Math.sign(rawAngle) * Math.pow(Math.abs(rawAngle), 1.4) * 1.8 * window.System.sens;
-                    
-                    // Acelerador Progressivo
-                    if(d.speed < h * 0.065) d.speed += h * 0.0008; 
-                } else { 
-                    d.speed *= 0.95; // Freio motor mais forte
-                }
+                // Define Estado
+                if(d.hands.left && d.hands.right) d.inputState = 2; // Volante Completo
+                else if (d.hands.left || d.hands.right) d.inputState = 1; // Modo Luva Única
+                else d.inputState = 0; // Sem Input
             }
-            
-            // SUAVIZAÇÃO INTELIGENTE (RESPONSIVIDADE)
-            // Se estiver voltando pro centro, é mais rápido (0.4). Se estiver virando, um pouco mais suave (0.25).
-            const reactionSpeed = (Math.abs(targetAngle) < Math.abs(d.steer)) ? 0.4 : 0.25;
-            d.steer += (targetAngle - d.steer) * reactionSpeed;
-            
-            // Trava física do volante (não deixa girar infinito)
-            d.steer = Math.max(-1.5, Math.min(1.5, d.steer));
 
-            // Atualiza UI Volante HTML
-            const wheel = document.getElementById('visual-wheel');
-            if(wheel) wheel.style.transform = `rotate(${d.steer * 80}deg)`; // Rotação visual mais agressiva
+            // =================================================================
+            // 2. FÍSICA DO VOLANTE (SMART STEERING 2.0 - ESTABILIDADE MÁXIMA)
+            // =================================================================
+            if(d.inputState === 2) {
+                const p1 = d.hands.left;
+                const p2 = d.hands.right;
 
-            // --- 2. FÍSICA DO CARRO ---
+                // Centro e Raio do Volante
+                const centerX = (p1.x + p2.x) / 2;
+                const centerY = (p1.y + p2.y) / 2;
+                const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+                // Suavização visual (Lerp)
+                d.wheel.x += (centerX - d.wheel.x) * 0.25;
+                d.wheel.y += (centerY - d.wheel.y) * 0.25;
+                let targetRadius = Math.max(w * 0.10, Math.min(w * 0.28, dist / 2));
+                d.wheel.radius += (targetRadius - d.wheel.radius) * 0.15;
+                d.wheel.opacity = Math.min(1, d.wheel.opacity + 0.15); // Fade in rápido
+
+                // Cálculo do Ângulo Bruto
+                const dy = p2.y - p1.y; 
+                const dx = p2.x - p1.x;
+                let rawAngle = Math.atan2(dy, dx);
+
+                // [UPDATE 177] SMART DEADZONE (Zona Morta Inteligente)
+                // Aumentada significativamente para facilitar andar em linha reta.
+                // O carro ignora pequenas inclinações involuntárias.
+                const baseDeadzone = 0.15; // 15% de tolerância no centro (antes era 0.06)
+                const speedStiffening = 0.10 * speedRatio; // Fica mais duro quanto mais rápido
+                const totalDeadzone = baseDeadzone + speedStiffening;
+                
+                if(Math.abs(rawAngle) < totalDeadzone) {
+                    rawAngle = 0; // Trava no centro perfeito
+                } else {
+                    // Remove o "salto" quando sai da deadzone para ser suave
+                    rawAngle = rawAngle - (Math.sign(rawAngle) * totalDeadzone);
+                }
+                
+                // [UPDATE 177] CURVA DE RESPOSTA (Controle Preciso)
+                // Reduzi o multiplicador (de 2.8 para 1.8) e a exponencial (de 2.2 para 1.7)
+                // Isso faz a direção ser menos "nervosa".
+                targetAngle = Math.sign(rawAngle) * Math.pow(Math.abs(rawAngle), 1.7) * 1.8 * window.System.sens;
+                
+                // Auto-Aceleração (Nintendo Style)
+                if(d.speed < h * 0.075) d.speed += h * 0.0007; 
+
+            } else {
+                // Se não tem as duas mãos, volante desaparece e carro desacelera
+                d.wheel.opacity *= 0.8;
+                d.speed *= 0.96; // Freio motor
+                targetAngle = 0; // Auto-center
+            }
+
+            // [UPDATE 177] PESO E INÉRCIA (Heavy Steering)
+            // Aumentei a suavização para o carro não "sabonetar".
+            // O volante demora um pouquinho mais para responder, dando sensação de peso.
+            const heavySteering = 0.08; // Valor fixo e suave (antes era dinâmico e rápido)
+            d.steer += (targetAngle - d.steer) * heavySteering;
+            d.steer = Math.max(-1.4, Math.min(1.4, d.steer)); // Limite de esterçamento levemente reduzido para segurança
+
+            // Atualiza ângulo visual do volante
+            d.wheel.angle = d.steer;
+
+            // Esconde volante antigo da UI
+            const uiWheel = document.getElementById('visual-wheel');
+            if(uiWheel) uiWheel.style.opacity = '0'; 
+
+            // =================================================================
+            // 3. FÍSICA DE MOVIMENTO (PISTA x CARRO)
+            // =================================================================
             d.pos += d.speed;
-            d.score += Math.floor(d.speed * 0.1);
+            d.score += Math.floor(d.speed * 0.2);
             
-            // Geometria da Pista
-            d.curve = Math.sin(d.pos * 0.003) * 1.5;
+            // Curvatura da Pista
+            d.curve = Math.sin(d.pos * 0.002) * 2.2; 
             
-            // Cálculo de Vetor de Movimento
-            // Quanto mais rápido, mais sensível a direção (Realismo)
-            const handling = (d.speed / (h * 0.06)) * 1.2; 
+            // [UPDATE 177] ASSISTÊNCIA DE CURVA (Drift Assist)
+            // Se o carro está virando para o lado certo da curva, a física ajuda mais.
+            let centrifugalForce = 0.80; 
+            const turningIntoCurve = (Math.sign(d.curve) !== Math.sign(d.steer)); 
             
-            d.x += d.steer * (d.speed / (h * 0.55)) * handling; // Direção do piloto
-            d.x -= d.curve * (d.speed / h); // Força da pista jogando o carro
-            
-            // Colisão Lateral (Fricção com Muro)
-            if(Math.abs(d.x) > 1.35) { 
-                d.speed *= 0.92; // Perde velocidade por atrito
-                d.x = d.x > 0 ? 1.35 : -1.35;
-                if(d.speed > 5) {
-                    d.health -= 0.2; // Dano contínuo ao raspar
-                    // Tremor da tela
-                    ctx.save();
-                    ctx.translate((Math.random()-0.5)*10, (Math.random()-0.5)*10);
-                    ctx.restore();
-                }
+            // [UPDATE 177] LANE ASSIST (Ímã de Centro)
+            // Se o volante estiver perto do centro, o carro é puxado suavemente
+            // para o meio da pista, corrigindo trajetórias erradas.
+            if(Math.abs(d.steer) < 0.25) {
+                d.x = d.x * 0.95; // Força de centralização aumentada (era 0.985)
             }
 
-            // --- 3. GERAÇÃO DE MUNDO ---
+            // Cálculo Final de Posição X (Grip melhorado)
+            const grip = 1.0; // Grip total, sem perda por velocidade para facilitar
+            d.x += (d.steer * 0.08 * grip) - (d.curve * (d.speed/h) * centrifugalForce);
             
-            // Cones e Placas
-            if(Math.random() < 0.02 && d.speed > 5) {
-                const type = Math.random() < 0.35 ? 'sign' : 'cone';
-                let posX = (Math.random() * 2.2) - 1.1;
-                if(type === 'sign') posX = (Math.random() < 0.5 ? -1.6 : 1.6); // Placas bem na borda
-                d.obs.push({ x: posX, z: 1000, type: type });
+            // Colisão Bordas
+            let isOffRoad = false;
+            if(Math.abs(d.x) > 1.5) { 
+                d.speed *= 0.93; isOffRoad = true; d.x = d.x > 0 ? 1.5 : -1.5;
+                if(d.speed > 2) { window.Gfx.shake(Math.random()*2.5); if(Math.random()<0.2) window.Sfx.play(100,'noise',0.1,0.05); }
             }
 
-            // Inimigos Inteligentes
-            if(Math.random() < 0.008 && d.speed > 8) {
+            // Vibração Visual
+            d.bounce = Math.sin(Date.now() / 30) * (1 + speedRatio * 2);
+            if(isOffRoad) d.bounce = (Math.random() - 0.5) * 12;
+            d.visualTilt += (d.steer - d.visualTilt) * 0.2;
+
+            // =================================================================
+            // 4. OBJETOS DO MUNDO (SPAWN)
+            // =================================================================
+            if(Math.random() < 0.025 && d.speed > 5) {
+                const type = Math.random() < 0.3 ? 'sign' : 'cone';
+                let obsX = (Math.random() * 2.2) - 1.1;
+                if(type === 'sign') obsX = (Math.random() < 0.5 ? -1.6 : 1.6);
+                d.obs.push({ x: obsX, z: 2000, type: type, hit: false });
+            }
+            if(Math.random() < 0.012 && d.speed > 8) {
                 d.enemies.push({
-                    x: (Math.random() * 1.6) - 0.8, 
-                    z: 1000, 
-                    speed: d.speed * (0.6 + Math.random()*0.3), // Velocidade variada
-                    color: Math.random() < 0.5 ? '#0033cc' : '#008800',
-                    laneChange: (Math.random() - 0.5) * 0.01 // Eles trocam de faixa levemente
+                    x: (Math.random() * 1.5) - 0.75, z: 2000, 
+                    speed: d.speed * (0.6 + Math.random()*0.35),
+                    color: Math.random() < 0.5 ? '#e67e22' : '#2980b9',
+                    laneChange: (Math.random() - 0.5) * 0.02
                 });
             }
 
-            // --- 4. RENDERIZAÇÃO DO AMBIENTE ---
-            const horizon = h * 0.4;
-            
-            // Céu Degradê Realista
+            // =================================================================
+            // 5. RENDERIZAÇÃO: CENÁRIO NINTENDO STYLE
+            // =================================================================
+            // Céu
             const gradSky = ctx.createLinearGradient(0, 0, 0, horizon);
-            gradSky.addColorStop(0, "#1e90ff"); // Azul Dodger
-            gradSky.addColorStop(1, "#87cefa"); // Azul Claro
+            gradSky.addColorStop(0, "#0099ff"); gradSky.addColorStop(1, "#87CEEB");
             ctx.fillStyle = gradSky; ctx.fillRect(0, 0, w, horizon);
-            
-            // Gramado com Textura (Simulada por ruído ou cor sólida)
-            ctx.fillStyle = '#2d8a2d'; ctx.fillRect(0, horizon, w, h);
 
-            // Perspectiva da Pista
-            const topW = w * 0.01; 
-            const botW = w * 1.8; // Pista bem larga na base (sensação de velocidade)
-            const curveOff = d.curve * (w * 0.55);
+            // Montanhas/Nuvens Parallax
+            ctx.fillStyle = 'rgba(255,255,255,0.8)';
+            const bgX = d.steer * 80 + (d.curve * 150);
+            const drawCloud = (cx, cy, s) => { ctx.beginPath(); ctx.arc(cx, cy, 30*s, 0, Math.PI*2); ctx.arc(cx+25*s, cy-10*s, 35*s, 0, Math.PI*2); ctx.arc(cx+50*s, cy, 30*s, 0, Math.PI*2); ctx.fill(); };
+            drawCloud(w*0.2 - bgX, horizon*0.6, 1.2); drawCloud(w*0.8 - bgX, horizon*0.4, 0.8);
 
-            // 4.1 Zebras (Alta Visibilidade)
-            const zebraW = w * 0.2;
-            const zebraFreq = Math.floor(d.pos / 35) % 2;
-            ctx.fillStyle = (zebraFreq === 0) ? '#cc0000' : '#ffffff';
+            ctx.fillStyle = '#2ecc71'; ctx.beginPath(); ctx.moveTo(0, horizon);
+            ctx.quadraticCurveTo(w*0.3, horizon - 50, w*0.6, horizon);
+            ctx.quadraticCurveTo(w*0.8, horizon - 80, w, horizon);
+            ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.fill();
+
+            // Grama
+            const grassColor1 = '#32cd32'; ctx.fillStyle = grassColor1; ctx.fillRect(0, horizon, w, h);
+
+            // PISTA (PROJEÇÃO)
+            const roadW_Far = w * 0.01; const roadW_Near = w * 2.2;
+            const roadCurveVis = d.curve * (w * 0.7);
+
+            // Zebras (Curbs)
+            const zebraSize = w * 0.35; const segmentSize = 40; const segmentPhase = Math.floor(d.pos / segmentSize) % 2;
+            ctx.fillStyle = (segmentPhase === 0) ? '#ff0000' : '#ffffff';
             ctx.beginPath();
-            ctx.moveTo(cx + curveOff - topW - (zebraW*0.1), horizon);
-            ctx.lineTo(cx + curveOff + topW + (zebraW*0.1), horizon);
-            ctx.lineTo(cx + botW + zebraW, h);
-            ctx.lineTo(cx - botW - zebraW, h);
+            ctx.moveTo(cx + roadCurveVis - roadW_Far - (zebraSize*0.05), horizon);
+            ctx.lineTo(cx + roadCurveVis + roadW_Far + (zebraSize*0.05), horizon);
+            ctx.lineTo(cx + roadW_Near + zebraSize, h);
+            ctx.lineTo(cx - roadW_Near - zebraSize, h);
             ctx.fill();
 
-            // 4.2 Asfalto
-            ctx.fillStyle = '#444'; 
+            // Asfalto
+            ctx.fillStyle = '#555'; 
             ctx.beginPath();
-            ctx.moveTo(cx + curveOff - topW, horizon);
-            ctx.lineTo(cx + curveOff + topW, horizon);
-            ctx.lineTo(cx + botW, h);
-            ctx.lineTo(cx - botW, h);
+            ctx.moveTo(cx + roadCurveVis - roadW_Far, horizon);
+            ctx.lineTo(cx + roadCurveVis + roadW_Far, horizon);
+            ctx.lineTo(cx + roadW_Near, h);
+            ctx.lineTo(cx - roadW_Near, h);
             ctx.fill();
 
-            // 4.3 Faixas Centrais
-            ctx.strokeStyle = '#ffcc00'; 
-            ctx.lineWidth = w * 0.012;
-            ctx.setLineDash([h * 0.08, h * 0.12]); // Faixas mais longas
-            ctx.lineDashOffset = -d.pos; 
-            ctx.beginPath(); 
-            ctx.moveTo(cx + curveOff, horizon); 
-            ctx.quadraticCurveTo(cx + (curveOff * 0.4), h * 0.7, cx, h); 
-            ctx.stroke(); 
-            ctx.setLineDash([]);
+            // Speed Lines (Textura)
+            if(d.speed > 1) {
+                ctx.strokeStyle = 'rgba(0,0,0,0.15)'; ctx.lineWidth = 4;
+                ctx.beginPath();
+                const lines = 4; const offset = (d.pos % 100) / 100;
+                for(let i=0; i<lines; i++) {
+                    const depth = (i + offset) / lines; 
+                    const y = horizon + (h-horizon) * (depth*depth); 
+                    const widthAtY = roadW_Far + (roadW_Near-roadW_Far) * (depth*depth);
+                    const centerAtY = cx + roadCurveVis * (1-depth);
+                    ctx.moveTo(centerAtY - widthAtY, y); ctx.lineTo(centerAtY + widthAtY, y);
+                }
+                ctx.stroke();
+            }
 
-            // --- 5. OBJETOS E INIMIGOS ---
-            let drawList = [];
-            
-            // Update Obstáculos
+            // Faixa Central
+            ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = w * 0.015;
+            ctx.setLineDash([h * 0.1, h * 0.15]); ctx.lineDashOffset = -d.pos * 1.5;
+            ctx.beginPath();
+            ctx.moveTo(cx + roadCurveVis, horizon);
+            ctx.quadraticCurveTo(cx + (roadCurveVis * 0.3), h * 0.7, cx, h);
+            ctx.stroke(); ctx.setLineDash([]);
+
+            // =================================================================
+            // 6. OBJETOS (Z-SORTING)
+            // =================================================================
+            let drawQueue = [];
             d.obs.forEach((o, i) => {
-                o.z -= d.speed * 2.2; 
-                if(o.z < -100) { d.obs.splice(i,1); return; }
-                drawList.push({ type: o.type, obj: o, z: o.z });
+                o.z -= d.speed * 2.0; if(o.z < -300) { d.obs.splice(i,1); return; }
+                drawQueue.push({ type: o.type, obj: o, z: o.z });
             });
-
-            // Update Inimigos
             d.enemies.forEach((e, i) => {
-                e.z -= (d.speed - e.speed) * 2.2;
-                e.x += e.laneChange; // IA simples
-                if(e.z < -300 || e.z > 1500) { d.enemies.splice(i,1); return; }
-                drawList.push({ type: 'car', obj: e, z: e.z });
+                e.z -= (d.speed - e.speed) * 2.0; e.x += e.laneChange;
+                if(e.x > 0.8) e.laneChange = -0.015; if(e.x < -0.8) e.laneChange = 0.015;
+                if(e.z < -500 || e.z > 3000) { d.enemies.splice(i,1); return; }
+                drawQueue.push({ type: 'kart', obj: e, z: e.z });
             });
+            drawQueue.sort((a, b) => b.z - a.z);
 
-            drawList.sort((a, b) => b.z - a.z);
-
-            drawList.forEach(item => {
-                const o = item.obj;
-                const scale = 500 / (o.z + 100);
-                
-                if(scale > 0 && o.z < 1000) {
-                    const objX = cx + (d.curve * w * 0.3 * (1 - o.z/1000)) + (o.x * w * 0.5 * scale);
-                    const objY = (h * 0.4) + (50 * scale);
-                    const size = (w * 0.12) * scale;
-
-                    // Hitbox
+            drawQueue.forEach(item => {
+                const o = item.obj; const scale = 500 / (o.z + 500);
+                if(scale > 0 && o.z < 2500) {
+                    const screenX = cx + (d.curve * w * 0.8 * (o.z/2500)) + (o.x * w * 0.7 * scale);
+                    const screenY = horizon + (30 * scale);
+                    const size = (w * 0.18) * scale;
                     let hit = false;
-                    // Hitbox mais precisa (baseada na escala)
-                    if(o.z < 100 && o.z > -50 && Math.abs(d.x - o.x) < 0.3) hit = true;
+                    if(o.z < 100 && o.z > -100 && Math.abs(d.x - o.x) < 0.45 && !o.hit) hit = true;
 
                     if(item.type === 'cone') {
-                        ctx.fillStyle = '#ff5500';
-                        ctx.beginPath(); ctx.moveTo(objX, objY - size); 
-                        ctx.lineTo(objX - size*0.4, objY); ctx.lineTo(objX + size*0.4, objY); ctx.fill();
-                        // Faixa reflexiva
-                        ctx.fillStyle = '#fff';
-                        ctx.fillRect(objX - size*0.2, objY - size*0.6, size*0.4, size*0.2);
-                        
-                        if(hit) {
-                            d.speed *= 0.6; d.health -= 8; window.Sfx.crash(); 
-                            d.obs.splice(d.obs.indexOf(o), 1);
-                        }
+                        ctx.fillStyle = '#ff6b6b'; ctx.beginPath(); ctx.moveTo(screenX, screenY - size);
+                        ctx.lineTo(screenX - size*0.3, screenY); ctx.lineTo(screenX + size*0.3, screenY); ctx.fill();
+                        ctx.fillStyle = '#fff'; ctx.fillRect(screenX - size*0.3, screenY-4*scale, size*0.6, 4*scale);
+                        if(hit) { o.hit = true; d.speed *= 0.8; d.health -= 5; window.Sfx.crash(); window.Gfx.shake(10); d.obs.splice(d.obs.indexOf(o), 1); }
                     } 
-                    else if (item.type === 'sign') {
-                        const ph = size * 2.5;
-                        ctx.fillStyle = '#333'; ctx.fillRect(objX - 2, objY - ph, 4*scale, ph); 
-                        ctx.fillStyle = '#004488'; // Azul Rodovia
-                        ctx.fillRect(objX - size*1.2, objY - ph, size*2.4, size);
-                        ctx.strokeStyle = '#fff'; ctx.lineWidth=2*scale; 
-                        ctx.strokeRect(objX - size*1.2, objY - ph, size*2.4, size);
-                        
-                        // Setas na placa
-                        ctx.fillStyle = '#fff'; ctx.beginPath();
-                        ctx.moveTo(objX - size*0.5, objY - ph + size*0.2);
-                        ctx.lineTo(objX + size*0.5, objY - ph + size*0.5);
-                        ctx.lineTo(objX - size*0.5, objY - ph + size*0.8);
-                        ctx.fill();
-
-                        if(hit) {
-                            d.speed *= 0.3; d.health -= 20; window.Sfx.crash(); 
-                            d.obs.splice(d.obs.indexOf(o), 1);
-                        }
-                    }
-                    else if (item.type === 'car') {
-                        const es = scale * w * 0.0035;
-                        ctx.save(); ctx.translate(objX, objY); ctx.scale(es, es);
-                        // Renderização simplificada do inimigo
-                        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(0, 15, 35, 12, 0, 0, Math.PI*2); ctx.fill();
-                        ctx.fillStyle = '#111'; ctx.fillRect(-28, 0, 10, 16); ctx.fillRect(18, 0, 10, 16);
-                        ctx.fillStyle = o.color; ctx.beginPath(); ctx.roundRect(-22, -20, 44, 45, 6); ctx.fill();
-                        ctx.fillStyle = '#000'; ctx.fillRect(-18, -15, 36, 10); // Vidro traseiro
+                    else if(item.type === 'kart') {
+                        const kScale = scale * w * 0.005;
+                        ctx.save(); ctx.translate(screenX, screenY); ctx.scale(kScale, kScale);
+                        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(0, 10, 30, 8, 0, 0, Math.PI*2); ctx.fill();
+                        ctx.fillStyle = o.color; ctx.fillRect(-20, -15, 40, 20);
+                        ctx.fillStyle = '#222'; ctx.fillRect(-22, -5, 8, 15); ctx.fillRect(14, -5, 8, 15);
+                        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, -20, 12, 0, Math.PI*2); ctx.fill();
                         ctx.restore();
-
-                        if(hit) {
-                            d.speed = 0; d.health -= 30; window.Sfx.crash();
-                            o.z -= 300; // Física de batida (empurra)
-                            o.speed += 5; // Inimigo foge
-                        }
+                        if(hit) { o.hit = true; d.speed = 0; d.health -= 20; window.Sfx.crash(); window.Gfx.shake(30); o.z -= 500; }
+                    }
+                    else if(item.type === 'sign') {
+                        const hSign = size * 2;
+                        ctx.fillStyle = '#555'; ctx.fillRect(screenX-2*scale, screenY-hSign, 4*scale, hSign);
+                        ctx.fillStyle = '#f1c40f'; ctx.beginPath(); 
+                        ctx.moveTo(screenX - size*0.8, screenY - hSign); ctx.lineTo(screenX + size*0.8, screenY - hSign); ctx.lineTo(screenX, screenY - hSign - size); ctx.fill();
+                        if(hit) { o.hit = true; d.speed *= 0.5; d.health -= 15; window.Sfx.crash(); window.Gfx.shake(20); d.obs.splice(d.obs.indexOf(o), 1); }
                     }
                 }
             });
 
-            // --- 6. KART DO JOGADOR (DETALHADO E RESPONSIVO) ---
-            const carX = cx + (d.x * w * 0.25);
-            const carY = h * 0.85;
-            const s = w * 0.0035;
+            // =================================================================
+            // 7. PLAYER KART
+            // =================================================================
+            const carScale = w * 0.0055;
+            const carX = cx + (d.x * w * 0.3);
+            const carY = h * 0.88 + d.bounce;
             
-            // Efeito visual de curva (Paralaxe Limitado)
-            // Multiplicador 22 garante que não "quebra" o sprite
-            let visualTurn = d.steer * 22; 
-            visualTurn = Math.max(-24, Math.min(24, visualTurn)); 
+            ctx.save(); ctx.translate(carX, carY); ctx.scale(carScale, carScale); ctx.rotate(d.visualTilt * 0.15);
 
-            ctx.save();
-            ctx.translate(carX, carY);
-            
-            // Shake de dano
-            if(d.health < 40) ctx.translate((Math.random()-0.5)*3, (Math.random()-0.5)*3);
-            
-            ctx.scale(s, s);
-
-            // 1. Sombra
-            ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(0, 18, 38, 14, 0, 0, Math.PI*2); ctx.fill();
-
-            // 2. Rodas Traseiras (Largas)
-            ctx.fillStyle = '#1a1a1a';
-            ctx.fillRect(-32, 2, 14, 20); ctx.fillRect(18, 2, 14, 20);
-
-            // 3. Chassi (Cor Dinâmica)
-            if(d.health > 70) ctx.fillStyle = '#e60000'; // Vermelho Ferrari
-            else if(d.health > 30) ctx.fillStyle = '#b71c1c'; // Vermelho Escuro
-            else ctx.fillStyle = '#5c0000'; // Queimado
-            ctx.beginPath(); ctx.roundRect(-24, -22, 48, 50, 8); ctx.fill();
-
-            // 4. Detalhes do Motor
-            ctx.fillStyle = '#333'; ctx.fillRect(-14, 25, 28, 10);
-            ctx.fillStyle = '#111'; 
-            ctx.beginPath(); ctx.arc(-8, 32, 4, 0, Math.PI*2); ctx.fill(); // Escape E
-            ctx.beginPath(); ctx.arc(8, 32, 4, 0, Math.PI*2); ctx.fill();  // Escape D
-
-            // Fumaça de Dano
-            if(d.health < 50) {
-                const gray = Math.floor(100 + Math.random()*50);
-                ctx.fillStyle = `rgba(${gray},${gray},${gray},0.6)`;
-                ctx.beginPath(); ctx.arc(0, -35, 15 + Math.random()*10, 0, Math.PI*2); ctx.fill();
+            // Partículas
+            if(Math.abs(d.steer) > 0.8 && d.speed > 5) {
+                const color = (Math.floor(Date.now()/100)%2===0) ? '#ffcc00' : '#ff3300';
+                if(Math.random()<0.5) { particles.push({x: carX - 30, y: carY+20, vx: -2, vy: 2, s: 5, c: color, l: 20}); particles.push({x: carX + 30, y: carY+20, vx: 2, vy: 2, s: 5, c: color, l: 20}); }
             }
+            if(isOffRoad) particles.push({x: carX, y: carY+10, vx: (Math.random()-0.5)*5, vy: 5, s: 8, c: '#8B4513', l: 30});
 
-            // 5. Rodas Dianteiras (Animadas)
-            ctx.fillStyle = '#1a1a1a';
-            ctx.fillRect(-30 + visualTurn, -25, 12, 16); 
-            ctx.fillRect(18 + visualTurn, -25, 12, 16);
+            // Modelo do Kart (Retro)
+            ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(0, 25, 50, 15, 0, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#111'; ctx.fillRect(-50, 5, 25, 25); ctx.fillRect(25, 5, 25, 25);
+            ctx.fillStyle = '#ddd'; ctx.fillRect(-45, 10, 15, 15); ctx.fillRect(30, 10, 15, 15);
+            ctx.fillStyle = '#333'; ctx.fillRect(-25, 20, 50, 15);
+            ctx.fillStyle = '#777'; ctx.beginPath(); ctx.arc(-15, 30, 6, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(15, 30, 6, 0, Math.PI*2); ctx.fill(); 
+            const bodyGrad = ctx.createLinearGradient(-30, -20, 30, 20); bodyGrad.addColorStop(0, '#ff0000'); bodyGrad.addColorStop(1, '#cc0000');
+            ctx.fillStyle = bodyGrad; ctx.beginPath(); ctx.moveTo(-20, -50); ctx.lineTo(20, -50); ctx.lineTo(35, 10); ctx.lineTo(40, 25); ctx.lineTo(-40, 25); ctx.lineTo(-35, 10); ctx.fill();
+            ctx.fillStyle = '#222'; ctx.beginPath(); ctx.ellipse(0, 0, 20, 15, 0, 0, Math.PI*2); ctx.fill();
 
-            // 6. Cockpit e Piloto
-            ctx.fillStyle = '#222'; ctx.fillRect(-16, -10, 32, 20); // Banco
-            
-            // Capacete (Amarelo com listra)
-            ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.arc(visualTurn * 0.6, -8, 12, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(visualTurn * 0.6, -8, 12, 0, Math.PI, true); ctx.fill(); // Detalhe
-
-            // Volante
-            ctx.strokeStyle = '#000'; ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.moveTo(-10 + visualTurn, -15); ctx.lineTo(10 + visualTurn, -15); ctx.stroke();
-
+            // Cockpit e Piloto
+            ctx.save(); ctx.rotate(d.steer * 0.5); 
+            ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, -25, 18, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#ff0000'; ctx.font="bold 12px Arial"; ctx.textAlign="center"; ctx.fillText("M", 0, -32);
+            ctx.fillStyle = '#333'; ctx.fillRect(-12, -28, 24, 8);
             ctx.restore();
 
-            // --- 7. HUD NO TOPO (NÍVEL + VIDA) ---
-            const hudY = h * 0.08;
-            const hudW = w * 0.5;
-            
-            // Tubo do Nível
-            ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.roundRect(cx - hudW/2, hudY, hudW, 25, 12); ctx.fill(); ctx.stroke();
-            
-            // Marcações do Nível
-            ctx.beginPath(); ctx.moveTo(cx-20, hudY); ctx.lineTo(cx-20, hudY+25); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(cx+20, hudY); ctx.lineTo(cx+20, hudY+25); ctx.stroke();
+            // Rodas Frente
+            ctx.fillStyle = '#111';
+            ctx.save(); ctx.translate(-35, -35); ctx.rotate(d.steer * 0.6); ctx.fillRect(-8, -10, 16, 20); ctx.restore();
+            ctx.save(); ctx.translate(35, -35); ctx.rotate(d.steer * 0.6); ctx.fillRect(-8, -10, 16, 20); ctx.restore();
+            ctx.restore();
 
-            // Bolinha do Nível (Verde = Bom, Vermelho = Ruim)
-            let bubX = cx - (d.steer * (hudW * 0.9));
-            bubX = Math.max(cx - hudW/2 + 12, Math.min(cx + hudW/2 - 12, bubX));
-            ctx.fillStyle = Math.abs(d.steer) < 0.1 ? '#00ff00' : '#ff4400';
-            ctx.beginPath(); ctx.arc(bubX, hudY + 12.5, 9, 0, Math.PI*2); ctx.fill();
+            particles.forEach((p, i) => { p.x += p.vx; p.y += p.vy; p.l--; if(p.l <= 0) particles.splice(i, 1); else { ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, p.s, 0, Math.PI*2); ctx.fill(); } });
 
-            // Barra de Vida (Logo abaixo do nível)
-            const hpY = hudY + 35;
-            ctx.fillStyle = '#000'; ctx.fillRect(cx - hudW/2, hpY, hudW, 8);
-            ctx.fillStyle = d.health > 50 ? '#00ff00' : '#ff0000';
-            ctx.fillRect(cx - hudW/2, hpY, Math.max(0, hudW * (d.health/100)), 8);
+            // =================================================================
+            // 8. HUD
+            // =================================================================
+            const hudX = w - 80; const hudY = h - 60;
+            ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.arc(hudX, hudY, 50, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.stroke();
+            ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = "bold 36px 'Russo One'"; ctx.fillText(Math.floor(d.speed * 20), hudX, hudY + 10);
+            ctx.font = "12px Arial"; ctx.fillText("KM/H", hudX, hudY + 30);
             
-            ctx.fillStyle = '#fff'; ctx.font = "bold 12px Arial"; ctx.textAlign="center";
-            ctx.fillText(`DANOS: ${100 - Math.ceil(d.health)}%`, cx, hpY + 20);
+            const hpW = w * 0.3;
+            ctx.fillStyle = '#333'; ctx.fillRect(cx - hpW/2, 20, hpW, 10);
+            const hpColor = d.health > 50 ? '#2ecc71' : '#e74c3c';
+            ctx.fillStyle = hpColor; ctx.fillRect(cx - hpW/2 + 2, 22, (hpW-4) * (d.health/100), 6);
 
-            // --- 8. GAME OVER ---
-            if(d.health <= 0) {
-                window.System.gameOver("PERDA TOTAL!");
+            // =================================================================
+            // 9. RENDERIZAÇÃO DE INPUT PROGRESSIVO (GLOVE -> WHEEL)
+            // =================================================================
+            // Função auxiliar para desenhar uma luva flutuante
+            const drawGlove = (x, y, label) => {
+                const s = w * 0.08;
+                const grad = ctx.createRadialGradient(x, y, s*0.2, x, y, s);
+                grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#cccccc');
+                
+                ctx.save();
+                ctx.shadowColor = '#3498db'; ctx.shadowBlur = 15;
+                ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#3498db'; ctx.beginPath(); ctx.arc(x, y, s*0.6, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#fff'; ctx.font = "bold 24px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle"; 
+                ctx.fillText(label, x, y);
+                ctx.restore();
+            };
+
+            if(d.inputState === 1) {
+                // Estado: UMA MÃO (Mostra luva individual)
+                if(d.hands.left) drawGlove(d.hands.left.x, d.hands.left.y, "L");
+                if(d.hands.right) drawGlove(d.hands.right.x, d.hands.right.y, "R");
+                
+                // Texto de ajuda
+                ctx.fillStyle = "#fff"; ctx.font = "bold 24px Arial"; ctx.textAlign = "center";
+                ctx.shadowColor = "black"; ctx.shadowBlur = 5;
+                ctx.fillText("USE AS DUAS MÃOS!", cx, h * 0.2);
+                ctx.shadowBlur = 0;
+            }
+            else if (d.inputState === 2 && d.wheel.opacity > 0.05) {
+                // Estado: DUAS MÃOS (VOLANTE ESPORTIVO COMPLETO)
+                ctx.save();
+                ctx.globalAlpha = d.wheel.opacity;
+                ctx.translate(d.wheel.x, d.wheel.y);
+                ctx.rotate(d.wheel.angle); // Usa o ângulo suavizado
+                
+                const r = d.wheel.radius;
+
+                // Sombra Profunda (3D)
+                ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 30; ctx.shadowOffsetY = 15;
+
+                // Aro Externo (Branco Lustroso)
+                ctx.fillStyle = '#f5f5f5'; 
+                ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI*2); ctx.fill();
+                
+                // Aro Interno (Buraco)
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.beginPath(); ctx.arc(0, 0, r * 0.7, 0, Math.PI*2); ctx.fill();
+                ctx.globalCompositeOperation = 'source-over';
+
+                // Bordas de Acabamento
+                ctx.strokeStyle = '#ccc'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI*2); ctx.stroke();
+                ctx.beginPath(); ctx.arc(0, 0, r * 0.7, 0, Math.PI*2); ctx.stroke();
+
+                // Miolo Central (Preto Esportivo)
+                ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+                ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(0, 0, r * 0.25, 0, Math.PI*2); ctx.fill();
+
+                // Hastes (Spokes) Racing
+                ctx.fillStyle = '#ddd';
+                // Haste Esquerda
+                ctx.beginPath(); ctx.moveTo(-r*0.2, 0); ctx.lineTo(-r*0.72, -r*0.1); ctx.lineTo(-r*0.72, r*0.1); ctx.lineTo(-r*0.2, 0); ctx.fill();
+                // Haste Direita
+                ctx.beginPath(); ctx.moveTo(r*0.2, 0); ctx.lineTo(r*0.72, -r*0.1); ctx.lineTo(r*0.72, r*0.1); ctx.lineTo(r*0.2, 0); ctx.fill();
+                // Haste Baixo (Vazada)
+                ctx.fillStyle = '#ccc';
+                ctx.beginPath(); ctx.moveTo(-r*0.1, r*0.1); ctx.lineTo(r*0.1, r*0.1); ctx.lineTo(0, r*0.7); ctx.fill();
+
+                // GRIPS (Pegada Azul Antiderrapante)
+                ctx.fillStyle = '#3498db';
+                ctx.beginPath(); ctx.arc(-r*0.85, 0, r*0.12, 0, Math.PI*2); ctx.fill(); // Esq
+                ctx.beginPath(); ctx.arc(r*0.85, 0, r*0.12, 0, Math.PI*2); ctx.fill();  // Dir
+
+                // SPORTY RED STRIPE (Marcador de Centro - 12 horas)
+                ctx.fillStyle = '#e74c3c';
+                ctx.beginPath();
+                ctx.moveTo(-r*0.06, -r); ctx.lineTo(r*0.06, -r);
+                ctx.lineTo(r*0.04, -r*0.7); ctx.lineTo(-r*0.04, -r*0.7);
+                ctx.fill();
+
+                // Logotipo
+                ctx.fillStyle = '#fff'; ctx.font = `bold ${r*0.12}px Arial`; 
+                ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+                ctx.fillText("Wii", 0, 0);
+
+                ctx.restore();
             }
 
-            // --- 9. LUVAS DO JOGADOR (SEMPRE VISÍVEIS) ---
-            // Desenha as luvas por cima de tudo para referência visual perfeita
-            if(window.Gfx && window.Gfx.drawSteeringHands) {
-                window.Gfx.drawSteeringHands(ctx, pose, w, h);
-            }
+            if(d.health <= 0) window.System.gameOver("MOTOR QUEBROU!");
 
             return d.score;
         }
     };
 
-    // REGISTRO NO CORE
     if(window.System) {
-        window.System.registerGame('drive', 'Kart do Otto', '🏎️', Logic, {camOpacity: 0.5, showWheel: true});
+        window.System.registerGame('drive', 'Otto Kart', '🏎️', Logic, {camOpacity: 0.4, showWheel: false});
     }
 })();
