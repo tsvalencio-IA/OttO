@@ -1,17 +1,21 @@
-// LÓGICA DO JOGO: KART DO OTTO (VW SAVEIRO SUMMER EDITION - ESTABILIDADE TOTAL)
-// ARCHITECT: CODE 177 - FÍSICA CORRIGIDA & VISUAL RETRÔ
+// =============================================================================
+// LÓGICA DO JOGO: OTTO KART (SAVEIRO SUMMER EDITION - GOLD MASTER)
+// ENGINE: "NINTENDO CORE" v4.0 - ESTABILIDADE & ADERÊNCIA MÁXIMA
+// =============================================================================
 (function() {
-    // --- CONFIGURAÇÕES ---
+    // --- TUNING DE ENGENHARIA (CONFIGURAÇÕES) ---
     const CONF = {
         TRACK_LENGTH: 16000,
-        MAX_SPEED: 190,          // Velocidade Alta (Esportiva)
+        MAX_SPEED: 210,         // Velocidade Agressiva
+        ACCEL: 1.5,             // Arrancada forte
+        GRIP: 0.94,             // Coeficiente de atrito lateral (Evita sabonete)
+        CENTER_FORCE: 0.04,     // O "Fixador" (Puxa pro centro)
         FOV: 800,
-        GRACE_TIME: 150,         // 5 Segundos de piloto automático
-        LANE_CENTER_FORCE: 0.03, // O "Fixador" que puxa pro centro
-        WALL_BOUNCE: 1.2         // Rebote controlado
+        GRACE_TIME: 150,        // Tempo do Auto-Pilot
+        LANE_WIDTH: 2000
     };
 
-    // Paleta Retrô (Como solicitado)
+    // Paleta Clássica Nintendo (Solicitada)
     const PALETTE = {
         skyTop: '#0099ff', skyBot: '#87CEEB',
         grass: '#32cd32',
@@ -29,7 +33,8 @@
         // --- ESTADO ---
         lap: 1, totalLaps: 3, rank: 8, score: 0, health: 100,
         item: 'shell',
-        spinTimer: 0, // Tempo girando (controlado)
+        spinTimer: 0,
+        hitStun: 0,
         
         // --- AUTO-PILOT ---
         handsFreeTimer: 0,
@@ -43,7 +48,7 @@
         hands: { left: null, right: null },
         wheel: { x: 0, y: 0, angle: 0, opacity: 0 },
         
-        // --- MUNDO ---
+        // --- ENTIDADES ---
         opponents: [],
         props: [],
         
@@ -54,46 +59,48 @@
             this.resetRace();
             this.createFireButton();
             
-            // Som de partida clássico
-            window.System.msg("PREPARAR..."); 
+            // Sequência de Largada Profissional
+            window.System.msg("QUALIFYING"); 
             window.Sfx.play(100, 'sawtooth', 0.5, 0.2); 
             setTimeout(() => { window.System.msg("3"); window.Sfx.play(400, 'square', 0.2); }, 1000);
             setTimeout(() => { window.System.msg("2"); window.Sfx.play(400, 'square', 0.2); }, 2000);
-            setTimeout(() => { window.System.msg("1"); window.Sfx.play(400, 'square', 0.2); }, 3000);
+            setTimeout(() => { window.System.msg("1"); window.Sfx.play(600, 'square', 0.2); }, 3000);
             setTimeout(() => { 
-                window.System.msg("VAI!"); 
-                window.Sfx.play(400, 'square', 1.0, 0.1);
+                window.System.msg("GO!!!"); 
+                window.Sfx.play(800, 'square', 1.0, 0.1);
             }, 4000);
         },
 
         resetRace: function() {
             this.speed = 0; this.posZ = 0; this.posX = 0; this.steer = 0;
             this.lap = 1; this.health = 100; this.score = 0; this.item = 'shell';
-            this.spinTimer = 0;
+            this.spinTimer = 0; this.hitStun = 0;
             particles = []; projectiles = [];
             
-            // Rivais Inteligentes
-            const names = ["Luigi", "Peach", "Bowser", "Toad", "Yoshi"];
-            const colors = ['#2ecc71', '#ff9ff3', '#f39c12', '#ecf0f1', '#7cfc00'];
+            // Adversários Competitivos
+            const names = ["Luigi", "Peach", "Bowser", "Yoshi", "Toad"];
+            const colors = ['#2ecc71', '#ff9ff3', '#f39c12', '#7cfc00', '#ecf0f1'];
             
             this.opponents = [];
             for(let i=0; i<5; i++) {
                 this.opponents.push({
                     id: i, name: names[i], color: colors[i],
                     x: (Math.random()-0.5), z: (i+1) * 300, 
-                    speed: 0, maxSpeed: CONF.MAX_SPEED * (0.92 + Math.random()*0.1),
+                    speed: 0, maxSpeed: CONF.MAX_SPEED * (0.94 + Math.random()*0.08),
                     spin: 0
                 });
             }
 
-            // Pista Procedural (Cenário Retrô)
+            // Geração de Pista (Balanceada)
             this.props = [];
-            for(let i=1000; i<CONF.TRACK_LENGTH*3; i+=400) {
-                if(Math.random() < 0.3) {
+            for(let i=1000; i<CONF.TRACK_LENGTH*3; i+=350) {
+                // Obstáculos laterais (Canos)
+                if(Math.random() < 0.35) {
                     this.props.push({ type: 'pipe', z: i, x: (Math.random()>0.5 ? 1.4 : -1.4), hit:false });
                 }
-                if(Math.random() < 0.2) {
-                    this.props.push({ type: Math.random()<0.5?'box':'coin', z: i, x: (Math.random()*1.8 - 0.9), hit:false });
+                // Itens no centro
+                if(Math.random() < 0.25) {
+                    this.props.push({ type: Math.random()<0.6?'box':'coin', z: i, x: (Math.random()*1.2 - 0.6), hit:false });
                 }
             }
         },
@@ -104,28 +111,34 @@
 
             const btn = document.createElement('div');
             btn.id = 'kart-fire-btn';
-            // Ícone de tiro ou texto
-            btn.innerHTML = '🔥'; 
+            // Ícone tático
+            btn.innerHTML = `<div style="font-size:40px; transform:rotate(-45deg)">🚀</div>`; 
             
-            // POSICIONAMENTO: CANTO INFERIOR ESQUERDO (Longe do velocímetro)
+            // ESTILO PAINEL DE CONTROLE (Lado Esquerdo)
             Object.assign(btn.style, {
                 position: 'absolute', bottom: '40px', left: '30px',
                 width: '100px', height: '100px',
-                borderRadius: '50%',
-                background: 'radial-gradient(circle at 30% 30%, #ff4444, #cc0000)',
-                border: '5px solid white',
-                boxShadow: '0 8px 15px rgba(0,0,0,0.6)',
-                color: 'white', fontSize: '50px', lineHeight: '100px', textAlign: 'center',
+                borderRadius: '16px', // Quadrado arredondado (estilo botão automotivo)
+                background: 'linear-gradient(180deg, #ff4444, #990000)',
+                border: '4px solid #fff',
+                borderBottom: '8px solid #ccc', // Efeito 3D de clique
+                boxShadow: '0 10px 20px rgba(0,0,0,0.5)',
+                color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 zIndex: '9999', cursor: 'pointer', pointerEvents: 'auto',
                 transform: 'scale(0)', transition: 'transform 0.2s',
-                textShadow: '2px 2px 0 #000'
+                userSelect: 'none'
             });
 
             const action = (e) => {
                 e.preventDefault(); e.stopPropagation();
-                if(this.item) {
-                    btn.style.transform = 'scale(0.9)';
-                    setTimeout(()=> btn.style.transform = 'scale(1)', 100);
+                if(this.item && this.hitStun === 0) {
+                    // Animação de clique físico
+                    btn.style.borderBottom = '4px solid #ccc';
+                    btn.style.transform = 'scale(0.95) translateY(4px)';
+                    setTimeout(()=> {
+                        btn.style.borderBottom = '8px solid #ccc';
+                        btn.style.transform = 'scale(1) translateY(0)';
+                    }, 100);
                     this.shoot();
                 }
             };
@@ -138,172 +151,195 @@
 
         shoot: function() {
             if(!this.item) return;
-            window.Sfx.play(600, 'square', 0.1);
+            window.Sfx.play(800, 'square', 0.1);
+            window.Sfx.play(200, 'noise', 0.2);
+            
             projectiles.push({
-                x: this.posX, z: this.posZ + 200, 
-                speed: this.speed + 60, life: 300, type: 'green_shell'
+                x: this.posX, z: this.posZ + 250, 
+                speed: this.speed + 80, life: 300, type: 'green_shell'
             });
+            
             this.item = null;
             if(this.btnFire) {
                 this.btnFire.style.filter = 'grayscale(100%)';
-                this.btnFire.innerHTML = '🚫';
-                setTimeout(() => { if(this.btnFire) this.btnFire.style.transform = 'scale(0)'; }, 500);
+                this.btnFire.style.opacity = '0.5';
+                setTimeout(() => { if(this.btnFire) this.btnFire.style.transform = 'scale(0)'; }, 400);
             }
         },
 
         update: function(ctx, w, h, pose) {
             const cx = w/2;
             const cy = h/2;
-            const horizon = h * 0.35; // Horizonte Clássico
+            const horizon = h * 0.35;
 
             // =================================================================
-            // 1. INPUT SYSTEM (ESTABILIZADO)
+            // 1. INPUT SYSTEM PRO (COM ESTABILIZAÇÃO)
             // =================================================================
             let targetSteer = 0;
             let handsActive = false;
 
-            if(pose) {
+            if(pose && this.health > 0) {
                 const kp = pose.keypoints;
                 const lw = kp.find(k=>k.name==='left_wrist');
                 const rw = kp.find(k=>k.name==='right_wrist');
                 if(lw && lw.score > 0.4) this.hands.left = window.Gfx.map(lw,w,h);
                 if(rw && rw.score > 0.4) this.hands.right = window.Gfx.map(rw,w,h);
 
+                // MÁQUINA DE ESTADOS DE INPUT
                 if(this.hands.left && this.hands.right) {
-                    // MODO DIRIGIR (2 Mãos)
+                    // --- MODO DIREÇÃO ESPORTIVA (2 Mãos) ---
                     this.inputState = 2;
                     this.handsFreeTimer = CONF.GRACE_TIME;
                     this.isAutoPilot = false;
                     handsActive = true;
 
-                    // Centraliza volante virtual
+                    // Centraliza volante virtual suavemente
                     const mx = (this.hands.left.x + this.hands.right.x)/2;
                     const my = (this.hands.left.y + this.hands.right.y)/2;
-                    this.wheel.x += (mx - this.wheel.x)*0.25;
-                    this.wheel.y += (my - this.wheel.y)*0.25;
+                    this.wheel.x += (mx - this.wheel.x)*0.2;
+                    this.wheel.y += (my - this.wheel.y)*0.2;
 
                     // Calcula Ângulo
                     const dx = this.hands.right.x - this.hands.left.x;
                     const dy = this.hands.right.y - this.hands.left.y;
                     let angle = Math.atan2(dy, dx);
                     
-                    // Deadzone Suave (Evita tremedeira)
+                    // Deadzone Inteligente (Evita tremedeira em retas)
                     if(Math.abs(angle) < 0.12) angle = 0;
                     
-                    targetSteer = angle * 2.0; 
+                    targetSteer = angle * 2.5; // Resposta rápida (Sport)
 
-                    // Acelera se não estiver girando
-                    if(this.speed < CONF.MAX_SPEED && this.spinTimer === 0) this.speed += 0.8;
-                    
-                    // Esconde botão se estiver dirigindo com as duas mãos
+                    // Aceleração Progressiva
+                    if(this.speed < CONF.MAX_SPEED && this.spinTimer === 0 && this.hitStun === 0) {
+                        this.speed += CONF.ACCEL;
+                    }
+
+                    // Esconde botão de tiro (Focus Mode)
                     if(this.btnFire) this.btnFire.style.transform = 'scale(0)';
 
                 } else if ((this.hands.left || this.hands.right) && this.handsFreeTimer > 0) {
-                    // MODO TIRO (1 Mão + Auto-Pilot)
+                    // --- MODO COMBATE (1 Mão + Auto-Pilot) ---
                     this.inputState = 1;
                     this.isAutoPilot = true;
                     this.handsFreeTimer--;
                     handsActive = true;
 
+                    // Mostra Botão
                     if(this.item && this.btnFire) {
                         this.btnFire.style.transform = 'scale(1)';
                         this.btnFire.style.filter = 'none';
-                        this.btnFire.innerHTML = '🔥';
+                        this.btnFire.style.opacity = '1';
                     }
-                    // Auto-pilot centraliza o carro
+                    
+                    // Auto-Pilot: Mantém o carro estável enquanto atira
                     targetSteer = this.steer * 0.8; 
-                    this.speed *= 0.995; 
+                    this.speed *= 0.99; // Mantém embalo
                 } else {
+                    // --- SEM CONTROLE ---
                     this.inputState = 0;
-                    this.speed *= 0.96; // Freio
+                    this.speed *= 0.96; // Freio motor
                     if(this.btnFire) this.btnFire.style.transform = 'scale(0)';
                 }
             }
 
-            // Aplica Direção (Com limite de rotação)
-            if(this.spinTimer > 0) {
-                // Durante spin, perde controle
-                this.steer += 0.3; 
-                this.spinTimer--; 
+            // APLICAÇÃO DE FÍSICA NO VOLANTE
+            if(this.spinTimer > 0 || this.hitStun > 0) {
+                // Perda de controle se bater
+                this.steer += (Math.random()-0.5) * 0.5;
                 this.speed *= 0.92;
+                if(this.spinTimer > 0) this.spinTimer--;
+                if(this.hitStun > 0) this.hitStun--;
             } else {
-                // Suavização normal
-                this.steer += (targetSteer - this.steer) * 0.12;
+                // Direção precisa
+                this.steer += (targetSteer - this.steer) * 0.15;
             }
             
+            // Atualiza Visual do Volante
             this.wheel.angle = this.steer;
             this.wheel.opacity += handsActive ? 0.1 : -0.1;
             this.wheel.opacity = Math.max(0, Math.min(1, this.wheel.opacity));
 
             // =================================================================
-            // 2. FÍSICA E MUNDO (FIXADOR DE CENTRO)
+            // 2. FÍSICA DO MUNDO (O SEGREDO DO "FIXADOR")
             // =================================================================
             this.posZ += this.speed;
 
-            // Curva Procedural (Senoide suave)
+            // Curva Suave (Senoide)
             const curve = Math.sin(this.posZ * 0.002) * 2.2;
             
-            // Movimento Lateral
-            this.posX += (this.steer * 0.05) - (curve * (this.speed/CONF.MAX_SPEED) * 0.05);
+            // Movimento Lateral com GRIP (Aderência)
+            // Se steer for 0, o carro não desliza sozinho.
+            this.posX += (this.steer * 0.06);           // Input
+            this.posX -= (curve * (this.speed/CONF.MAX_SPEED) * 0.06); // Força centrífuga da curva
 
-            // *** FIXADOR DE CENTRO (LANE ASSIST) ***
-            // Se o volante estiver quase reto, puxa o carro para o meio (0)
-            if(Math.abs(this.steer) < 0.3 && Math.abs(this.posX) < 0.8) {
-                this.posX -= this.posX * CONF.LANE_CENTER_FORCE;
+            // *** O FIXADOR (CENTER MAGNET) ***
+            // Se o jogador não estiver virando muito, puxe suavemente para o centro da pista.
+            // Isso cria a sensação de "trilho" e evita o efeito sabonete.
+            if(Math.abs(this.steer) < 0.2 && this.spinTimer === 0) {
+                this.posX = this.posX * CONF.GRIP; // Decaimento exponencial para o centro
             }
 
-            // Tilt Visual
-            this.visualTilt += ((this.steer - curve*0.5) - this.visualTilt) * 0.1;
+            // Tilt Visual (Inclinação do chassi)
+            this.visualTilt += ((this.steer - curve*0.6) - this.visualTilt) * 0.1;
             
-            // Colisão Borda (CORRIGIDA: Sem Spin Eterno)
+            // COLISÃO COM PAREDES (Refinada)
             let offRoad = false;
             if(Math.abs(this.posX) > 1.4) {
                 offRoad = true;
-                // Apenas reduz velocidade e empurra de volta
-                this.speed *= 0.90; 
-                this.shake = 5;
-                // Empurra para dentro da pista (Bounce)
-                this.posX = (this.posX > 0) ? 1.39 : -1.39;
+                this.speed *= 0.9; // Perde velocidade, mas não para
+                this.shake = 8;    // Tremor de impacto
                 
-                // Som de impacto leve
-                if(this.speed > 50 && Math.random() < 0.1) window.Sfx.play(100, 'noise', 0.1);
+                // Rebote Físico (Empurra de volta pra pista sem girar)
+                this.posX = (this.posX > 0) ? 1.35 : -1.35;
+                this.steer *= -0.2; // Contra-esterço automático leve
+                
+                if(this.speed > 80 && Math.random() < 0.2) window.Sfx.play(80, 'noise', 0.15);
             } else {
                 this.shake = 0;
             }
-            this.bounce = Math.sin(Date.now()/30) * (1 + (this.speed/CONF.MAX_SPEED)*2);
+            
+            // Vibração do motor (RPM)
+            this.bounce = Math.sin(Date.now()/30) * (1 + (this.speed/CONF.MAX_SPEED)*3);
 
-            // Loop
+            // Loop de Pista Infinito
             if(this.posZ >= CONF.TRACK_LENGTH) {
                 this.posZ -= CONF.TRACK_LENGTH;
                 this.lap++;
                 this.opponents.forEach(o => o.z -= CONF.TRACK_LENGTH);
                 this.props.forEach(p => p.hit = false);
+                window.System.msg("VOLTA " + this.lap + "/" + this.totalLaps);
             }
 
             // =================================================================
-            // 3. IAs & ITENS
+            // 3. IA COMPETITIVA (RUBBER BANDING)
             // =================================================================
             this.opponents.forEach(bot => {
-                if(bot.spin > 0) { bot.spin--; bot.speed *= 0.9; }
-                else {
+                if(bot.spin > 0) { 
+                    bot.spin--; 
+                    bot.speed *= 0.85; 
+                } else {
                     let targetSpd = bot.maxSpeed;
                     const dist = bot.z - this.posZ;
-                    if(dist < -2000) targetSpd *= 1.3; 
-                    if(dist > 3000) targetSpd *= 0.7;
+                    
+                    // IA elástica: Se você está na frente, eles aceleram. Se atrás, esperam.
+                    if(dist < -1500) targetSpd *= 1.4; // Turbo Mode
+                    if(dist > 2500) targetSpd *= 0.8;  // Cruise Mode
                     
                     bot.speed += (targetSpd - bot.speed) * 0.05;
                     bot.z += bot.speed;
                     
+                    // IA segue a curva perfeitamente
                     const bCurve = Math.sin(bot.z * 0.002) * 2.2;
-                    bot.x += (-Math.sign(bCurve)*0.6 - bot.x) * 0.03;
+                    bot.x += (-Math.sign(bCurve)*0.55 - bot.x) * 0.04;
                     
-                    if(Math.abs(dist) < 300 && Math.abs(bot.x - this.posX) < 0.3) {
-                        bot.x += bot.x > this.posX ? 0.05 : -0.05;
+                    // Desvio de colisão
+                    if(Math.abs(dist) < 300 && Math.abs(bot.x - this.posX) < 0.35) {
+                        bot.x += bot.x > this.posX ? 0.06 : -0.06;
                     }
                 }
             });
 
-            // Projéteis
+            // Projéteis (Cascos Verdes)
             for(let i=projectiles.length-1; i>=0; i--) {
                 const p = projectiles[i];
                 p.z += p.speed;
@@ -311,38 +347,44 @@
                 
                 let hit = false;
                 this.opponents.forEach(bot => {
-                    if(!hit && Math.abs(p.z - bot.z) < 150 && Math.abs(p.x - bot.x) < 0.4) {
+                    if(!hit && Math.abs(p.z - bot.z) < 200 && Math.abs(p.x - bot.x) < 0.5) {
                         bot.spin = 60; hit = true;
-                        window.System.msg("HIT " + bot.name + "!");
+                        window.System.msg("ACERTOU " + bot.name + "!");
                         window.Sfx.crash();
+                        // Partículas de impacto
+                        for(let k=0;k<8;k++) particles.push({x:bot.x, z:bot.z, y:0, vx:Math.random()-0.5, vy:Math.random(), c:'#ff0', life:20});
                     }
                 });
                 if(p.life <= 0 || hit) projectiles.splice(i,1);
             }
 
-            // Obstáculos
+            // Obstáculos e Itens
             this.props.forEach(p => {
                 let dz = p.z - this.posZ;
                 while(dz < -500) dz += CONF.TRACK_LENGTH;
                 while(dz > CONF.TRACK_LENGTH - 500) dz -= CONF.TRACK_LENGTH;
 
-                if(!p.hit && Math.abs(dz) < 100 && Math.abs(p.x - this.posX) < 0.35) {
+                if(!p.hit && Math.abs(dz) < 120 && Math.abs(p.x - this.posX) < 0.4) {
                     p.hit = true;
                     if(p.type === 'box') {
-                        window.Sfx.play(1000, 'square', 0.1);
+                        window.Sfx.play(1200, 'square', 0.1);
                         this.item = 'shell';
-                        window.System.msg("ITEM GET!");
+                        window.System.msg("CASCO VERDE!");
                     } else if (p.type === 'pipe') {
-                        // Impacto forte (gira)
-                        this.spinTimer = 40; this.health -= 20;
-                        window.System.msg("CRASH!"); window.Sfx.crash();
+                        this.hitStun = 30; // Perda de controle temporária
+                        this.health -= 15;
+                        this.speed *= 0.3; // Parada brusca
+                        window.System.msg("BATIDA!"); 
+                        window.Sfx.crash();
+                        window.Gfx.shake(20);
                     } else if (p.type === 'coin') {
-                         window.Sfx.coin(); this.score+=50;
+                         window.Sfx.coin(); this.score+=50; 
+                         this.speed = Math.min(this.speed + 10, CONF.MAX_SPEED + 20); // Mini Turbo
                     }
                 }
             });
 
-            // Rank
+            // Cálculo de Rank em Tempo Real
             let r = 1;
             this.opponents.forEach(o => {
                 const bTotal = o.z + (this.lap * CONF.TRACK_LENGTH);
@@ -351,17 +393,16 @@
             });
             this.rank = r;
 
-
             // =================================================================
-            // 4. RENDERIZAÇÃO (VISUAL RETRÔ CLASSICO)
+            // 4. RENDERIZAÇÃO (ENGINE VISUAL RETRÔ + SAVEIRO WHEEL)
             // =================================================================
             
-            // Céu
+            // --- CÉU & FUNDO (ORIGINAL SOLICITADO) ---
             const gradSky = ctx.createLinearGradient(0, 0, 0, horizon);
-            gradSky.addColorStop(0, "#0099ff"); gradSky.addColorStop(1, "#87CEEB");
+            gradSky.addColorStop(0, PALETTE.skyTop); gradSky.addColorStop(1, PALETTE.skyBot);
             ctx.fillStyle = gradSky; ctx.fillRect(0, 0, w, horizon);
 
-            // Montanhas/Nuvens (Retro)
+            // Nuvens Parallax
             ctx.fillStyle = 'rgba(255,255,255,0.8)';
             const bgX = this.steer * 80 + (curve * 150);
             const drawCloud = (cx, cy, s) => { ctx.beginPath(); ctx.arc(cx, cy, 30*s, 0, Math.PI*2); ctx.arc(cx+25*s, cy-10*s, 35*s, 0, Math.PI*2); ctx.arc(cx+50*s, cy, 30*s, 0, Math.PI*2); ctx.fill(); };
@@ -379,15 +420,15 @@
             // Grama
             ctx.fillStyle = PALETTE.grass; ctx.fillRect(0, horizon, w, h);
 
-            // Estrada (Projeção)
+            // --- ESTRADA (PROJEÇÃO TRAPEZOIDAL) ---
             const roadW_Far = w * 0.01; const roadW_Near = w * 2.2;
             const cxFar = cx - (curve * w * 0.8) - (this.steer * w * 0.4);
             const cxNear = cx - (this.posX * w * 1.0);
 
-            // Zebras
+            // Zebras (Efeito Velocidade)
             const segLen = 400; const phase = Math.floor(this.posZ / segLen) % 2;
             const zebraW = w * 0.35;
-            ctx.fillStyle = (phase === 0) ? '#ff0000' : '#ffffff';
+            ctx.fillStyle = (phase === 0) ? PALETTE.curbA : PALETTE.curbB;
             ctx.beginPath();
             ctx.moveTo(cxFar - roadW_Far - (zebraW*0.05), horizon);
             ctx.lineTo(cxFar + roadW_Far + (zebraW*0.05), horizon);
@@ -396,7 +437,7 @@
             ctx.fill();
 
             // Asfalto
-            ctx.fillStyle = '#555'; 
+            ctx.fillStyle = PALETTE.road; 
             ctx.beginPath();
             ctx.moveTo(cxFar - roadW_Far, horizon);
             ctx.lineTo(cxFar + roadW_Far, horizon);
@@ -412,8 +453,10 @@
             ctx.quadraticCurveTo((cxFar+cxNear)/2 + curve*100, (horizon+h)/2, cxNear, h);
             ctx.stroke(); ctx.setLineDash([]);
 
-            // Objetos do Mundo
+            // --- Z-BUFFER RENDER SYSTEM ---
             let drawQueue = [];
+            
+            // Adiciona Elementos na Fila de Desenho
             this.opponents.forEach(o => {
                 let dz = o.z - this.posZ;
                 if(dz < -5000) dz += CONF.TRACK_LENGTH;
@@ -431,6 +474,7 @@
                 if(dz > 10) drawQueue.push({type:'shell', obj:p, z:dz});
             });
 
+            // Ordena do mais longe para o mais perto
             drawQueue.sort((a,b) => b.z - a.z);
 
             drawQueue.forEach(item => {
@@ -447,10 +491,11 @@
                 else if (item.type === 'prop') this.drawProp(ctx, sx, sy, size, obj, scale);
             });
 
-            // Player Original (Sua Preferência)
+            // --- PLAYER CHARACTER (ORIGINAL RETRÔ) ---
             const carScale = w * 0.0055;
             const carX = cx + this.shake;
             const carY = h * 0.88 + this.bounce;
+            
             this.drawPlayerOriginal(ctx, carX, carY, carScale, this.visualTilt);
 
             // Partículas
@@ -460,7 +505,7 @@
                 else { ctx.fillStyle=p.c; ctx.beginPath(); ctx.arc(p.x, p.y, p.s || 4, 0, Math.PI*2); ctx.fill(); }
             });
 
-            // HUD
+            // --- INTERFACE DE USUÁRIO (HUD) ---
             this.drawHUD(ctx, w, h);
             this.drawSaveiroWheel(ctx, w, h);
 
@@ -470,7 +515,9 @@
             return this.score;
         },
 
-        // --- VISUAL HELPERS ---
+        // =====================================================================
+        // ASSETS GRÁFICOS (DESENHADOS NO CANVAS)
+        // =====================================================================
 
         drawPlayerOriginal: function(ctx, carX, carY, carScale, tilt) {
             ctx.save(); 
@@ -493,14 +540,14 @@
             // Banco
             ctx.fillStyle = '#222'; ctx.beginPath(); ctx.ellipse(0, 0, 20, 15, 0, 0, Math.PI*2); ctx.fill();
 
-            // Cockpit e Piloto
+            // Cockpit e Piloto (M)
             ctx.save(); ctx.rotate(this.steer * 0.5); 
             ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, -25, 18, 0, Math.PI*2); ctx.fill();
             ctx.fillStyle = '#ff0000'; ctx.font="bold 12px Arial"; ctx.textAlign="center"; ctx.fillText("M", 0, -32);
             ctx.fillStyle = '#333'; ctx.fillRect(-12, -28, 24, 8);
             ctx.restore();
 
-            // Rodas Frente
+            // Rodas Frente (Esterçam com o volante)
             ctx.fillStyle = '#111';
             ctx.save(); ctx.translate(-35, -35); ctx.rotate(this.steer * 0.6); ctx.fillRect(-8, -10, 16, 20); ctx.restore();
             ctx.save(); ctx.translate(35, -35); ctx.rotate(this.steer * 0.6); ctx.fillRect(-8, -10, 16, 20); ctx.restore();
@@ -527,17 +574,22 @@
 
         drawProp: function(ctx, x, y, size, o, scale) {
             if(o.type === 'pipe') {
+                 // Cano Estilo Mario (Verde e Brilhante)
                  const hSign = size * 1.5;
                  ctx.fillStyle = '#00aa00'; ctx.strokeStyle = '#004400'; ctx.lineWidth = 2;
                  ctx.fillRect(x - size/2, y - hSign, size, hSign); ctx.strokeRect(x - size/2, y - hSign, size, hSign);
-                 ctx.fillRect(x - size/2 - 5*scale, y - hSign, size + 10*scale, 20*scale); ctx.strokeRect(x - size/2 - 5*scale, y - hSign, size + 10*scale, 20*scale);
+                 // Borda superior do cano
+                 const rimW = size + 10*scale; const rimH = 20*scale;
+                 ctx.fillRect(x - rimW/2, y - hSign, rimW, rimH); ctx.strokeRect(x - rimW/2, y - hSign, rimW, rimH);
             } else if (o.type === 'box') {
+                 // Item Box Pulsante
                  const bS = size * 0.8;
-                 const f = Math.sin(Date.now()/200)*5;
-                 ctx.fillStyle = 'rgba(255,200,0,0.9)'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+                 const f = Math.sin(Date.now()/150)*8;
+                 ctx.fillStyle = 'rgba(255,200,0,0.8)'; ctx.strokeStyle = '#ffff00'; ctx.lineWidth = 3;
                  ctx.fillRect(x-bS/2, y-bS*2+f, bS, bS); ctx.strokeRect(x-bS/2, y-bS*2+f, bS, bS);
                  ctx.fillStyle = '#fff'; ctx.font="bold 20px Arial"; ctx.textAlign="center"; ctx.fillText("?", x, y-bS*1.3+f);
             } else {
+                 // Coin
                  const cS = size * 0.5;
                  ctx.fillStyle = '#f1c40f'; ctx.beginPath(); ctx.ellipse(x, y-cS*1.5, cS*0.7, cS, 0, 0, Math.PI*2); ctx.fill();
             }
@@ -548,7 +600,7 @@
             ctx.beginPath(); ctx.arc(x, y-s*0.4, s*0.3, 0, Math.PI*2); ctx.fill(); ctx.stroke();
         },
 
-        // --- VOLANTE SAVEIRO SUMMER (REDONDO ESPORTIVO) ---
+        // --- VOLANTE "SAVEIRO SUMMER" (VW CLASSIC 4-SPOKE) ---
         drawSaveiroWheel: function(ctx, w, h) {
             if(this.wheel.opacity <= 0.01) return;
             
@@ -559,50 +611,53 @@
             const s = w * 0.0013; 
             ctx.scale(s, s);
 
-            // Sombra Profunda
+            // Sombra do Volante
             ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 25; ctx.shadowOffsetY = 15;
 
-            // 1. ARO EXTERNO (Grosso e Preto)
+            // 1. ARO EXTERNO (Grosso, Preto, Textura de Couro)
             ctx.beginPath();
-            ctx.arc(0, 0, 140, 0, Math.PI*2); // Borda externa
-            ctx.arc(0, 0, 110, 0, Math.PI*2, true); // Borda interna
+            ctx.arc(0, 0, 140, 0, Math.PI*2); // Externo
+            ctx.arc(0, 0, 110, 0, Math.PI*2, true); // Interno
             ctx.fillStyle = '#111'; ctx.fill();
-            // Reflexo/Brilho no topo
+            // Reflexo superior
             const grad = ctx.createLinearGradient(0, -140, 0, -110);
             grad.addColorStop(0, '#444'); grad.addColorStop(1, '#111');
             ctx.strokeStyle = grad; ctx.lineWidth = 2; ctx.stroke();
 
-            // 2. MIOLO "4 BOLAS" (Clássico VW)
-            ctx.fillStyle = '#111';
-            ctx.beginPath();
-            ctx.arc(0, 0, 50, 0, Math.PI*2); 
-            ctx.fill();
+            // 2. O CLÁSSICO "4 BOLAS" (Design VW Anos 90)
+            ctx.fillStyle = '#1a1a1a'; // Preto fosco no centro
+            ctx.beginPath(); ctx.arc(0, 0, 55, 0, Math.PI*2); ctx.fill();
 
-            // 3. RAIOS (4 Raios conectando o centro ao aro)
+            // 3. RAIOS (4 Conexões Sólidas)
             ctx.fillStyle = '#222';
-            // Raio Esq
-            ctx.beginPath(); ctx.moveTo(-50, 0); ctx.lineTo(-110, -20); ctx.lineTo(-110, 20); ctx.lineTo(-50, 0); ctx.fill();
-            // Raio Dir
-            ctx.beginPath(); ctx.moveTo(50, 0); ctx.lineTo(110, -20); ctx.lineTo(110, 20); ctx.lineTo(50, 0); ctx.fill();
-            // Raio Baixo Esq
-            ctx.beginPath(); ctx.moveTo(-35, 35); ctx.lineTo(-80, 80); ctx.lineTo(-60, 95); ctx.lineTo(-20, 45); ctx.fill();
-            // Raio Baixo Dir
-            ctx.beginPath(); ctx.moveTo(35, 35); ctx.lineTo(80, 80); ctx.lineTo(60, 95); ctx.lineTo(20, 45); ctx.fill();
+            // Raio Superior Esquerdo
+            ctx.beginPath(); ctx.moveTo(-40, -35); ctx.lineTo(-115, -15); ctx.lineTo(-110, 15); ctx.lineTo(-40, 10); ctx.fill();
+            // Raio Superior Direito
+            ctx.beginPath(); ctx.moveTo(40, -35); ctx.lineTo(115, -15); ctx.lineTo(110, 15); ctx.lineTo(40, 10); ctx.fill();
+            // Raio Inferior Esquerdo
+            ctx.beginPath(); ctx.moveTo(-30, 45); ctx.lineTo(-80, 100); ctx.lineTo(-60, 110); ctx.lineTo(-20, 50); ctx.fill();
+            // Raio Inferior Direito
+            ctx.beginPath(); ctx.moveTo(30, 45); ctx.lineTo(80, 100); ctx.lineTo(60, 110); ctx.lineTo(20, 50); ctx.fill();
 
-            // 4. BUZINA CENTRAL (Cinza com logo)
+            // 4. BUZINA CENTRAL (A "Bola" da Saveiro Summer)
             ctx.shadowBlur = 0;
-            ctx.fillStyle = '#333'; ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = '#999'; ctx.beginPath(); ctx.arc(0, 0, 25, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(0, 0, 35, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#333'; ctx.lineWidth = 3; ctx.stroke();
             
-            // Logo "VW" (Estilizado)
-            ctx.fillStyle = '#111'; ctx.font="bold 18px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle";
-            ctx.fillText("Wii", 0, 0);
+            // Logo Central (VW estilizado)
+            ctx.fillStyle = '#silver'; 
+            ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#000'; ctx.font="bold 10px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle";
+            ctx.fillText("VW", 0, 0);
+
+            // Detalhe Vermelho Esportivo
+            ctx.fillStyle = '#cc0000'; ctx.beginPath(); ctx.rect(-5, 45, 10, 5); ctx.fill();
 
             ctx.restore();
         },
 
         drawHUD: function(ctx, w, h) {
-            // Velocímetro (Direita)
+            // Velocímetro (Direita - Não encosta no botão de tiro)
             const hudX = w - 80; const hudY = h - 60;
             ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.arc(hudX, hudY, 50, 0, Math.PI*2); ctx.fill();
             ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.stroke();
@@ -620,6 +675,7 @@
             ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.strokeRect(20, 20, 70, 70);
             if(this.item === 'shell') {
                 ctx.fillStyle = '#2ecc71'; ctx.beginPath(); ctx.arc(55, 55, 20, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = '#fff'; ctx.stroke();
             }
 
             // Barra Auto-Pilot
