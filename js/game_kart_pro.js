@@ -1,13 +1,13 @@
 /**
  * =============================================================================
- * OTTO KART PRO: DEFINITIVE NINTENDO EDITION (GOLD MASTER)
+ * OTTO KART PRO: ULTIMATE NINTENDO EDITION (GOLD MASTER)
  * =============================================================================
- * VERSÃO FINAL: FUSÃO DA ESTÉTICA ARCADE ANTIGA COM A NOVA ARQUITETURA.
- * RECURSOS RESTAURADOS:
- * 1. Volante Esportivo (Grips Azuis + Marcador Vermelho).
+ * RECRIAÇÃO TOTAL BASEADA NO LEGADO "THIAGO_WII (5)"
+ * FEATURES RESTAURADAS:
+ * 1. Volante Vetorial Esportivo (Grips Azuis + Marcador Vermelho).
  * 2. Física de Câmera "Lakitu" (FOV 800 + Bounce/Vibração).
  * 3. Paleta de Cores SEGA Blue Sky (#0099ff).
- * 4. HUD Completo (Rank, Velocímetro Digital).
+ * 4. HUD Completo (Rank, Velocímetro Digital, Minimapa).
  * 5. Integração Firebase para Ranking Global.
  * =============================================================================
  */
@@ -19,10 +19,10 @@
     // --- 1. TUNING DE ENGENHARIA (CONFIGURAÇÕES "ARCADE FEEL") ---
     const CONF = {
         TRACK_LENGTH: 16000,
-        MAX_SPEED: 240,         // Velocidade Arcade Agressiva
-        ACCEL: 1.5,             // Arrancada forte
+        MAX_SPEED: 245,         // Velocidade Arcade Agressiva
+        ACCEL: 1.8,             // Arrancada forte
         BREAKING: -200,
-        DECEL: -2,
+        DECEL: -3,
         OFFROAD_DECEL: -120,
         OFFROAD_LIMIT: 50,
         
@@ -438,6 +438,27 @@
             ctx.fillStyle = colors[this.rank-1] || '#fff';
             ctx.strokeText(this.rank + "º", 30, h-40);
             ctx.fillText(this.rank + "º", 30, h-40);
+
+            // Minimapa Circular
+            const mapR = 60; const mapX = 80; const mapY = h - 180;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.arc(mapX, mapY, mapR, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+            
+            // Jogador no Mapa
+            const pct = this.position / this.trackLength;
+            const angle = pct * Math.PI * 2;
+            const px = mapX + Math.sin(angle) * (mapR * 0.7);
+            const py = mapY - Math.cos(angle) * (mapR * 0.7);
+            ctx.fillStyle = '#00ffff'; ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI*2); ctx.fill();
+
+            // Rivais no Mapa
+            cars.forEach(c => {
+                const cp = c.z / this.trackLength;
+                const ca = cp * Math.PI * 2;
+                const cx = mapX + Math.sin(ca) * (mapR * 0.7);
+                const cy = mapY - Math.cos(ca) * (mapR * 0.7);
+                ctx.fillStyle = '#ff0000'; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI*2); ctx.fill();
+            });
 
             // Aviso de Mão
             if(!this.hands.active) {
