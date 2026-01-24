@@ -11,15 +11,15 @@ window.CoreFB = {
 
     init: async function() {
         // Configuração segura (fallback se variaveis de ambiente falharem)
-        const firebaseConfig = window.__firebase_config ? JSON.parse(window.__firebase_config) : {
-             apiKey: "AIzaSyD-PLACEHOLDER-KEY",
-             authDomain: "ottowii.firebaseapp.com",
-             databaseURL: "https://ottowii-default-rtdb.firebaseio.com",
-             projectId: "ottowii",
-             storageBucket: "ottowii.appspot.com",
-             messagingSenderId: "00000000000",
-             appId: "1:00000000000:web:00000000000000"
-        };
+        const firebaseConfig = {
+  apiKey: "AIzaSyB0ThqhfK6xc8P1D4WCkavhdXbb7zIaQJk",
+  authDomain: "thiaguinhowii.firebaseapp.com",
+  databaseURL: "https://thiaguinhowii-default-rtdb.firebaseio.com",
+  projectId: "thiaguinhowii",
+  storageBucket: "thiaguinhowii.firebasestorage.app",
+  messagingSenderId: "63695043126",
+  appId: "1:63695043126:web:abd6a8ba7792313991b697"
+};
 
         if(window.FB) {
             try {
