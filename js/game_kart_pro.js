@@ -1,11 +1,14 @@
 /**
  * =============================================================================
- * OTTO KART PRO: REMASTERED ENGINE (SYSTEM INTEGRATED)
- * Física Vetorial + Pseudo-3D + Integração Wii Menu
+ * OTTO KART PRO: REMASTERED ENGINE (SYSTEM INTEGRATED v3.0)
  * =============================================================================
+ * Correção Crítica: Auto-Discovery System para garantir registro no Menu.
  */
 
 (function() {
+    // --- ID DO JOGO (Deve ser igual ao do menu) ---
+    const GAME_ID = 'kart'; // Alterado para 'kart' para consistência
+
     // --- 1. CONFIGURAÇÕES DE ENGENHARIA ---
     const K = {
         MAX_SPEED: 240, ACCEL: 45, BREAKING: -80, DECEL: -5,
@@ -106,10 +109,6 @@
     // --- 4. RENDERIZADOR (OUTRUN STYLE) ---
     const Renderer = {
         draw: function(ctx, w, h, segments, phys) {
-            const cx = w/2;
-            const cy = h/2;
-            const horizon = h/2;
-
             // Sky
             const grad = ctx.createLinearGradient(0,0,0,h);
             grad.addColorStop(0, '#00bfff'); grad.addColorStop(1, '#cceeff');
@@ -202,7 +201,7 @@
             Physics.reset();
             this.lap = 1;
             window.System.msg("LARGADA!");
-            window.Sfx.boot();
+            if(window.Sfx) window.Sfx.boot();
             this.setupUI();
         },
 
@@ -288,10 +287,12 @@
             // Loop Detection
             if(Physics.z < 200 && this.oldZ > this.trackLength - 200) {
                 this.lap++;
-                document.getElementById('k-lap').innerText = this.lap;
+                const elLap = document.getElementById('k-lap');
+                if(elLap) elLap.innerText = this.lap;
+                
                 window.System.msg("VOLTA " + this.lap);
                 if(this.lap > K.TOTAL_LAPS) {
-                    window.CoreFB.saveScore('kart', Physics.speed * 100); // Salva no Firebase
+                    if(window.CoreFB) window.CoreFB.saveScore('kart', Physics.speed * 100); 
                     window.System.gameOver(Math.floor(Physics.speed * 100));
                 }
             }
@@ -301,11 +302,20 @@
         }
     };
 
-    // REGISTRO NO SISTEMA WII
-    const regLoop = setInterval(() => {
+    // --- REGISTRO BLINDADO NO SISTEMA WII ---
+    // Tenta registrar o jogo a cada 100ms até o sistema estar pronto
+    const tryRegister = setInterval(() => {
         if(window.System && window.System.registerGame) {
-            window.System.registerGame('kart', 'Otto Kart Pro', '🏎️', Logic, {camOpacity: 0.4});
-            clearInterval(regLoop);
+            console.log("[KART] Sistema detectado. Registrando...");
+            
+            window.System.registerGame(GAME_ID, { 
+                name: 'Otto Kart Pro', 
+                icon: '🏎️', 
+                camOpacity: 0.4 
+            }, Logic);
+            
+            clearInterval(tryRegister);
+            console.log("[KART] Jogo registrado com sucesso!");
         }
     }, 100);
 
