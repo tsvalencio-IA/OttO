@@ -1,7 +1,13 @@
 /* =================================================================
-   FIREBASE CORE INTEGRATION
+   FIREBASE CORE INTEGRATION (STANDALONE MODULE)
    Handles Auth & Realtime Database for Leaderboards
+   Project: ThiaguinhoWii
    ================================================================= */
+
+// Importação direta dos módulos (CDN) - Essencial para funcionar sem bundler (Webpack/Vite)
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+import { getDatabase, ref, set, push, onValue, query, orderByChild, limitToLast } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 
 window.CoreFB = {
     app: null,
@@ -9,55 +15,78 @@ window.CoreFB = {
     auth: null,
     user: null,
 
-    init: async function() {
-        // Configuração segura (fallback se variaveis de ambiente falharem)
-        const firebaseConfig = {
-  apiKey: "AIzaSyB0ThqhfK6xc8P1D4WCkavhdXbb7zIaQJk",
-  authDomain: "thiaguinhowii.firebaseapp.com",
-  databaseURL: "https://thiaguinhowii-default-rtdb.firebaseio.com",
-  projectId: "thiaguinhowii",
-  storageBucket: "thiaguinhowii.firebasestorage.app",
-  messagingSenderId: "63695043126",
-  appId: "1:63695043126:web:abd6a8ba7792313991b697"
-};
+    // SUAS CHAVES REAIS CONFIGURADAS AQUI
+    config: {
+        apiKey: "AIzaSyB0ThqhfK6xc8P1D4WCkavhdXbb7zIaQJk",
+        authDomain: "thiaguinhowii.firebaseapp.com",
+        databaseURL: "https://thiaguinhowii-default-rtdb.firebaseio.com",
+        projectId: "thiaguinhowii",
+        storageBucket: "thiaguinhowii.firebasestorage.app",
+        messagingSenderId: "63695043126",
+        appId: "1:63695043126:web:abd6a8ba7792313991b697"
+    },
 
-        if(window.FB) {
-            try {
-                this.app = window.FB.initializeApp(firebaseConfig);
-                this.db = window.FB.getDatabase(this.app);
-                this.auth = window.FB.getAuth(this.app);
-                
-                // Anonymous Login
-                const userCred = await window.FB.signInAnonymously(this.auth);
-                this.user = userCred.user;
-                console.log("Firebase Auth: OK", this.user.uid);
-                return true;
-            } catch(e) {
-                console.warn("Firebase Init Failed (Offline Mode):", e);
-                return false;
-            }
+    init: async function() {
+        console.log("🔥 Inicializando Firebase...");
+        
+        try {
+            // 1. Inicializa a Aplicação
+            this.app = initializeApp(this.config);
+            
+            // 2. Inicializa Serviços
+            this.db = getDatabase(this.app);
+            this.auth = getAuth(this.app);
+            
+            // 3. Autenticação Anônima (Necessária para leitura/escrita segura)
+            const userCred = await signInAnonymously(this.auth);
+            this.user = userCred.user;
+            
+            console.log("✅ Firebase Conectado! UID:", this.user.uid);
+            return true;
+
+        } catch(e) {
+            console.error("❌ Falha crítica no Firebase:", e);
+            console.warn("⚠️ O jogo rodará em modo OFFLINE. O Ranking não será salvo.");
+            return false;
         }
     },
 
+    // Salvar Pontuação
     saveScore: function(name, time, score) {
-        if(!this.db || !this.user) return;
-        const scoreRef = window.FB.ref(this.db, 'leaderboard');
-        const newScoreRef = window.FB.push(scoreRef);
-        window.FB.set(newScoreRef, {
-            name: name,
+        if(!this.db || !this.user) {
+            console.warn("Tentativa de salvar score falhou: Firebase offline.");
+            return;
+        }
+
+        const scoreRef = ref(this.db, 'leaderboard');
+        const newScoreRef = push(scoreRef);
+        
+        set(newScoreRef, {
+            name: name.toUpperCase().substring(0, 12), // Limite de caracteres para segurança UI
             time: time,
-            score: score,
+            score: parseInt(score),
             uid: this.user.uid,
             timestamp: Date.now()
+        }).then(() => {
+            console.log("🏆 Score salvo no servidor!");
+        }).catch((err) => {
+            console.error("Erro ao salvar score:", err);
         });
     },
 
+    // Ler Ranking (Top 10)
     getLeaderboard: function(callback) {
         if(!this.db) return;
-        const q = window.FB.query(window.FB.ref(this.db, 'leaderboard'), window.FB.orderByChild('score'), window.FB.limitToLast(10));
-        window.FB.onValue(q, (snapshot) => {
+        
+        // Query para pegar os últimos 10 baseados no score (Firebase ordena ascendente)
+        const q = query(ref(this.db, 'leaderboard'), orderByChild('score'), limitToLast(10));
+        
+        onValue(q, (snapshot) => {
             const data = [];
-            snapshot.forEach((child) => { data.push(child.val()); });
+            snapshot.forEach((child) => {
+                data.push(child.val());
+            });
+            // Inverte o array para mostrar o maior score primeiro (Descendente)
             callback(data.reverse());
         });
     }
