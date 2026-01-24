@@ -1,398 +1,618 @@
-/**
- * =============================================================================
- * OTTO KART: LEGACY EDITION (PORTING V5.0)
- * =============================================================================
- * PORT DIRETO DA ENGINE "THIAGO_WII" ORIGINAL PARA A NOVA ESTRUTURA.
- * MANTÉM: Física original, Gráficos originais, Volante detalhado.
- * ADICIONA: Compatibilidade com o Menu V10 e Firebase.
- * =============================================================================
- */
+// =============================================================================
+// OTTO KART: DEFINITIVE EDITION (RESTORED V5 PHYSICS & FEEL)
+// BASEADO NA ESTRUTURA V8, MAS COM A ALMA DO THIAGUINHO V5
+// =============================================================================
 
 (function() {
-    const GAME_ID = 'kart';
-
-    // --- CONFIGURAÇÕES ORIGINAIS (TUNING) ---
-    const CONF = {
-        MAX_SPEED: 240,
-        ACCEL: 1.5,
-        BREAKING: -200,
-        DECEL: -2,
-        OFFROAD_DECEL: -120,
-        OFFROAD_LIMIT: 60,
-        SEGMENT_LENGTH: 200,
-        RUMBLE_LENGTH: 3,
-        ROAD_WIDTH: 2000,
-        LANES: 3,
-        CAMERA_HEIGHT: 1000,
-        CAMERA_DEPTH: 0.84,
-        FOV: 800,
-        DRAW_DISTANCE: 300,
-        TOTAL_LAPS: 3
-    };
-
-    // --- CORES ORIGINAIS ---
-    const COLORS = {
-        SKY:  ['#0099ff', '#87CEEB'], // Azul Nintendo
-        GRASS: ['#10AA10', '#009900'],
-        ROAD:  ['#666666', '#636363'],
-        RUMBLE:['#c0392b', '#ffffff'],
-        LANE:  '#ffffff'
-    };
-
-    // --- ESTADO GLOBAL ---
-    let segments = [];
-    let cars = [];
+    // --- SISTEMA DE PARTÍCULAS E EFEITOS ---
+    let particles = [];
     
-    // --- UTILITÁRIOS (PROJEÇÃO 3D) ---
-    const Util = {
-        project: (p, camX, camY, camZ, w, h, depth) => {
-            p.camera.x = (p.world.x || 0) - camX;
-            p.camera.y = (p.world.y || 0) - camY;
-            p.camera.z = (p.world.z || 0) - camZ;
-            if (p.camera.z < 1) p.camera.z = 1;
-            p.screen.scale = depth / p.camera.z;
-            p.screen.x = Math.round((w/2) + (p.screen.scale * p.camera.x * w/2));
-            p.screen.y = Math.round((h/2) - (p.screen.scale * p.camera.y * h/2));
-            p.screen.w = Math.round((p.screen.scale * CONF.ROAD_WIDTH * w/2));
-        },
-        easeIn: (a,b,percent) => a + (b-a)*Math.pow(percent,2),
-        easeInOut: (a,b,percent) => a + (b-a)*((-Math.cos(percent*Math.PI)/2) + 0.5),
-        percentRemaining: (n, total) => (n % total) / total
+    // Configurações de Gameplay (Física V5 Pura)
+    const CONF = {
+        MAX_SPEED: 260,          // Velocidade máxima alta para sensação de risco
+        ACCEL: 0.8,              // Aceleração progressiva
+        DECEL: 0.96,             // Desaceleração natural (freio motor)
+        OFFROAD_GRIP: 0.92,      // Perda de aderência na grama
+        STEER_SENS: 2.8,         // Sensibilidade do volante (Nintendo style)
+        CURVE_FACTOR: 2.2,       // Força das curvas geradas
+        LANE_FORCE: 0.985,       // Assistência de centralização suave
+        CENTRIFUGAL: 0.85        // Força que joga pra fora na curva
     };
 
-    // --- LÓGICA DO JOGO ---
     const Logic = {
-        position: 0,
-        playerX: 0,
+        // --- ESTADO DO JOGO ---
         speed: 0,
-        steer: 0,
-        lap: 1,
-        rank: 8,
+        pos: 0,              // Posição Z global na pista infinita
+        x: 0,                // Posição X lateral (-1.5 a 1.5)
+        steer: 0,            // Volante virtual suavizado
+        curve: 0,            // Curvatura atual da pista
         
-        hands: { lx:0, ly:0, rx:0, ry:0, active: false, angle: 0 },
-        wheel: { angle: 0, opacity: 0 },
-
+        health: 100,         // "Motor" do carro
+        score: 0,
+        rank: 8,             // Posição na corrida (começa em último)
+        enemiesPassed: 0,    // Contador de ultrapassagens
+        
+        // --- VISUAL ---
+        visualTilt: 0,       // Inclinação visual do chassi
+        bounce: 0,           // Vibração vertical
+        
+        // --- INPUT (SISTEMA HÍBRIDO) ---
+        inputState: 0,       // 0=Nada, 1=1 Mão, 2=Volante
+        hands: { left: null, right: null },
+        wheel: { radius: 0, x: 0, y: 0, opacity: 0, angle: 0 },
+        
+        // --- OBJETOS ---
+        obs: [],
+        enemies: [],
+        
+        // --- INICIALIZAÇÃO ---
         init: function() {
-            this.position = 0; 
-            this.playerX = 0; 
             this.speed = 0;
+            this.pos = 0;
+            this.x = 0;
             this.steer = 0;
-            this.lap = 1;
-            this.buildTrack();
-            this.createRivais();
-            window.System.msg("LARGADA!");
-            if(window.Sfx) window.Sfx.boot();
-        },
+            this.health = 100;
+            this.score = 0;
+            this.rank = 8;
+            this.enemiesPassed = 0;
+            this.obs = [];
+            this.enemies = [];
+            particles = [];
+            this.inputState = 0;
 
-        // --- CONSTRUTOR DE PISTA (LEGADO) ---
-        buildTrack: function() {
-            segments = [];
-            const addSegment = (curve, y) => {
-                const n = segments.length;
-                segments.push({
-                    index: n,
-                    p1: { world: { y: this.lastY, z: n * CONF.SEGMENT_LENGTH }, camera: {}, screen: {} },
-                    p2: { world: { y: y, z: (n+1) * CONF.SEGMENT_LENGTH }, camera: {}, screen: {} },
-                    curve: curve,
-                    sprites: [],
-                    color: {
-                        road:   Math.floor(n/CONF.RUMBLE_LENGTH)%2 ? COLORS.ROAD[0] : COLORS.ROAD[1],
-                        grass:  Math.floor(n/CONF.RUMBLE_LENGTH)%2 ? COLORS.GRASS[0] : COLORS.GRASS[1],
-                        rumble: Math.floor(n/CONF.RUMBLE_LENGTH)%2 ? COLORS.RUMBLE[0] : COLORS.RUMBLE[1],
-                        lane:   Math.floor(n/CONF.RUMBLE_LENGTH)%2 ? COLORS.LANE : null
-                    }
-                });
-                this.lastY = y;
-            };
-
-            const addRoad = (enter, hold, leave, curve, y) => {
-                const startY = this.lastY || 0;
-                const endY = startY + (y * CONF.SEGMENT_LENGTH);
-                const total = enter + hold + leave;
-                for(let i=0; i<enter; i++) addSegment(Util.easeIn(0, curve, i/enter), Util.easeInOut(startY, endY, i/total));
-                for(let i=0; i<hold; i++)  addSegment(curve, Util.easeInOut(startY, endY, (enter+i)/total));
-                for(let i=0; i<leave; i++) addSegment(Util.easeInOut(curve, 0, i/leave), Util.easeInOut(startY, endY, (enter+hold+i)/total));
-            };
-
-            this.lastY = 0;
-            // Layout da Pista "Otto Circuit"
-            addRoad(50, 50, 50,  0,  0);
-            addRoad(40, 40, 40,  4,  0);
-            addRoad(60, 60, 60, -2,  40);
-            addRoad(40, 40, 40, -5, -40);
-            addRoad(80, 80, 80,  0,  0);
-            addRoad(30, 30, 30,  3,  10);
-            addRoad(30, 30, 30, -3, -10);
-            addRoad(100, 50, 50, 0,  0);
-
-            // Decoração
-            for(let i=20; i<segments.length; i+=20) {
-                if(Math.random() > 0.6) segments[i].sprites.push({ type: 'tree', offset: -1.5 - Math.random() });
-                if(Math.random() > 0.6) segments[i].sprites.push({ type: 'tree', offset:  1.5 + Math.random() });
-            }
-            this.trackLength = segments.length * CONF.SEGMENT_LENGTH;
-        },
-
-        createRivais: function() {
-            cars = [];
-            const colors = ['#e74c3c', '#f1c40f', '#3498db', '#9b59b6', '#2ecc71', '#e67e22', '#34495e'];
-            for(let i=0; i<7; i++) {
-                cars.push({ 
-                    z: (i+1) * 800, 
-                    speed: CONF.MAX_SPEED * (0.85 + (i*0.01)), 
-                    offset: (Math.random()-0.5) * 0.8, 
-                    color: colors[i] 
-                });
+            // Start Sequence
+            window.System.msg("MOTORES PRONTOS...");
+            if(window.Sfx) {
+                window.Sfx.play(100, 'sawtooth', 0.5, 0.2);
+                setTimeout(() => {
+                    window.System.msg("VAI!!!");
+                    window.Sfx.play(400, 'square', 1.0, 0.1);
+                }, 1500);
             }
         },
 
-        // --- UPDATE LOOP ---
+        // --- UPDATE LOOP (60 FPS) ---
         update: function(ctx, w, h, pose) {
-            const dt = 1/60;
+            const cx = w / 2;
+            const horizon = h * 0.35; // Linha do horizonte clássica V5
 
-            // 1. INPUT (Controle por Gestos ou Setas)
-            let throttle = false;
+            // =================================================================
+            // 1. INPUT: DETECÇÃO DO VOLANTE VIRTUAL (V5 LOGIC)
+            // =================================================================
+            this.inputState = 0;
+            this.hands.left = null;
+            this.hands.right = null;
+            let targetAngle = 0;
             
-            // Controle por Teclado (Fallback para testes)
-            // (Adicione aqui se quiser testar no PC sem câmera, mas o foco é IA)
-            
-            // Controle por IA (Mãos)
+            // Proporção de velocidade para ajustar física
+            const speedRatio = Math.min(1.2, this.speed / (h * 0.08));
+
             if(pose) {
-                const lw = pose.keypoints.find(k=>k.name==='left_wrist');
-                const rw = pose.keypoints.find(k=>k.name==='right_wrist');
+                const kp = pose.keypoints;
+                const lw = kp.find(k => k.name === 'left_wrist');
+                const rw = kp.find(k => k.name === 'right_wrist');
+
+                if(lw && lw.score > 0.4) this.hands.left = window.Gfx.map(lw, w, h);
+                if(rw && rw.score > 0.4) this.hands.right = window.Gfx.map(rw, w, h);
+
+                if(this.hands.left && this.hands.right) this.inputState = 2; // Volante!
+                else if(this.hands.left || this.hands.right) this.inputState = 1; // Uma mão
+            }
+
+            // FÍSICA DO VOLANTE
+            if(this.inputState === 2) {
+                const p1 = this.hands.left;
+                const p2 = this.hands.right;
+
+                // Centro e Raio
+                const centerX = (p1.x + p2.x) / 2;
+                const centerY = (p1.y + p2.y) / 2;
+                const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+                // Suavização da UI do volante
+                this.wheel.x += (centerX - this.wheel.x) * 0.25;
+                this.wheel.y += (centerY - this.wheel.y) * 0.25;
+                this.wheel.radius += ((dist/2) - this.wheel.radius) * 0.15;
+                this.wheel.opacity = Math.min(1, this.wheel.opacity + 0.15);
+
+                // Cálculo do Ângulo
+                const dy = p2.y - p1.y;
+                const dx = p2.x - p1.x;
+                let rawAngle = Math.atan2(dy, dx);
+
+                // Deadzone Dinâmica (Estabilidade em retas)
+                const deadzone = 0.06 + (0.12 * speedRatio);
+                if(Math.abs(rawAngle) < deadzone) rawAngle = 0;
+                else rawAngle -= Math.sign(rawAngle) * deadzone;
+
+                // Curva de Resposta Exponencial (Drift Feel)
+                targetAngle = Math.sign(rawAngle) * Math.pow(Math.abs(rawAngle), 2.2) * CONF.STEER_SENS;
                 
-                if(lw && rw && lw.score > 0.3 && rw.score > 0.3) {
-                    const l = window.Gfx.map(lw, w, h);
-                    const r = window.Gfx.map(rw, w, h);
-                    
-                    this.hands.active = true;
-                    this.hands.lx = l.x; this.hands.ly = l.y;
-                    this.hands.rx = r.x; this.hands.ry = r.y;
-                    
-                    const dx = r.x - l.x;
-                    const dy = r.y - l.y;
-                    const angle = Math.atan2(dy, dx);
-                    
-                    this.wheel.angle += (angle - this.wheel.angle) * 0.2;
-                    this.wheel.opacity = Math.min(1, this.wheel.opacity + 0.1);
-                    
-                    this.steer = Math.max(-1, Math.min(1, angle * 2.5));
-                    throttle = true; // Acelera se detectar mãos
-                } else {
-                    this.hands.active = false;
-                    this.wheel.opacity = Math.max(0, this.wheel.opacity - 0.1);
-                }
-            }
+                // Aceleração Automática
+                if(this.speed < h * 0.075) this.speed += h * 0.0008;
 
-            // 2. FÍSICA (Aqui faz o carro andar!)
-            if (throttle) {
-                this.speed = Util.easeIn(this.speed, CONF.MAX_SPEED, 0.02);
             } else {
-                this.speed = Util.easeIn(this.speed, 0, 0.05);
+                // Sem mãos: Desacelera e centraliza
+                this.wheel.opacity *= 0.8;
+                this.speed *= CONF.DECEL;
+                targetAngle = 0;
             }
 
-            this.position += this.speed * dt; // INCREMENTA POSIÇÃO
-            while(this.position >= this.trackLength) this.position -= this.trackLength;
-            while(this.position < 0) this.position += this.trackLength;
-
-            const playerSeg = segments[Math.floor(this.position/CONF.SEGMENT_LENGTH) % segments.length];
-            const speedPct = this.speed / CONF.MAX_SPEED;
-            const dx = dt * 2 * speedPct;
+            // Aplica Inércia ao Volante
+            const steerInertia = 0.05 + (0.10 * (1 - speedRatio));
+            this.steer += (targetAngle - this.steer) * steerInertia;
+            this.steer = Math.max(-1.6, Math.min(1.6, this.steer));
             
-            this.playerX -= (dx * playerSeg.curve * speedPct * 0.35);
-            this.playerX += (dx * this.steer * 1.8);
-            this.playerX = Math.max(-2.5, Math.min(2.5, this.playerX));
+            this.wheel.angle = this.steer; // Visual segue a física
 
-            // Offroad Check
-            if(Math.abs(this.playerX) > 2.0) {
-                this.speed = Math.min(this.speed, CONF.OFFROAD_LIMIT * 100); // Freia na grama
+            // =================================================================
+            // 2. FÍSICA DE MOVIMENTO (PISTA PROCEDURAL V5)
+            // =================================================================
+            this.pos += this.speed;
+            this.score += Math.floor(this.speed * 0.1);
+
+            // GERAÇÃO DA CURVA (Procedural - Math.sin)
+            // Cria uma pista infinita baseada em ondas senoidais
+            this.curve = Math.sin(this.pos * 0.002) * CONF.CURVE_FACTOR;
+            
+            // Adiciona complexidade à curva (retas e curvas fechadas)
+            if(Math.sin(this.pos * 0.0005) > 0.5) this.curve *= 2; // Curva fechada
+            if(Math.cos(this.pos * 0.001) > 0.8) this.curve = 0;   // Reta
+
+            // Assistência de Curva Inteligente
+            let centrifugal = CONF.CENTRIFUGAL;
+            const turningIntoCurve = (Math.sign(this.curve) !== Math.sign(this.steer));
+            if(turningIntoCurve && Math.abs(this.steer) > 0.3) {
+                centrifugal = 0.40; // Se virar contra a curva, ganha grip
             }
 
-            // 3. RIVAIS
-            let pAhead = 0;
-            cars.forEach(car => {
-                car.z += car.speed * dt;
-                if(car.z >= this.trackLength) car.z -= this.trackLength;
-                if(car.z > this.position) pAhead++;
-            });
-            this.rank = 1 + pAhead;
+            // Lane Assist (Ímã de Centro)
+            if(Math.abs(this.steer) < 0.1) this.x *= CONF.LANE_FORCE;
 
-            // 4. RENDERIZAÇÃO
-            this.render(ctx, w, h, playerSeg);
+            // CÁLCULO FINAL DE POSIÇÃO X
+            // X = Direção - Força da Curva (que joga pra fora)
+            const grip = 1.0 - (speedRatio * 0.05);
+            this.x += (this.steer * 0.095 * grip) - (this.curve * (this.speed/h) * centrifugal);
 
-            // 5. VOLTAS
-            if(this.position < 1000 && this.oldPos > this.trackLength - 1000) {
-                this.lap++;
-                window.System.msg("VOLTA " + this.lap);
-                if(this.lap > CONF.TOTAL_LAPS) {
-                    const score = Math.floor(this.speed * 10) + (1000 - this.rank*100);
-                    if(window.CoreFB) window.CoreFB.saveScore(GAME_ID, score);
-                    window.System.gameOver(score);
+            // Colisão com Bordas (Offroad)
+            let isOffRoad = false;
+            if(Math.abs(this.x) > 1.4) {
+                this.speed *= CONF.OFFROAD_GRIP;
+                isOffRoad = true;
+                this.x = this.x > 0 ? 1.4 : -1.4; // Parede invisível elástica
+                
+                // Shake e Som
+                if(this.speed > 2) {
+                    window.Gfx.shake(Math.random() * 3);
+                    if(Math.random() < 0.2 && window.Sfx) window.Sfx.play(100, 'noise', 0.1, 0.05);
                 }
             }
-            this.oldPos = this.position;
 
-            return Math.floor(this.speed);
-        },
+            // Vibrações Visuais
+            this.bounce = Math.sin(Date.now() / 30) * (1 + speedRatio * 2);
+            if(isOffRoad) this.bounce = (Math.random() - 0.5) * 12;
+            this.visualTilt += (this.steer - this.visualTilt) * 0.2;
 
-        // --- RENDERIZADOR (PINTA O MUNDO) ---
-        render: function(ctx, w, h, playerSeg) {
-            // A. FUNDO (CÉU + MONTANHAS)
-            // Céu
-            const grad = ctx.createLinearGradient(0,0,0,h);
-            grad.addColorStop(0, COLORS.SKY[0]); 
-            grad.addColorStop(1, COLORS.SKY[1]);
-            ctx.fillStyle = grad; 
-            ctx.fillRect(0,0,w,h);
-
-            // Montanhas (Parallax)
-            ctx.fillStyle = '#2c3e50';
-            ctx.beginPath();
-            ctx.moveTo(0, h/2);
-            for(let i=0; i<=w; i+=10) {
-                const off = (playerSeg.curve * 300) + (this.steer * 200);
-                const noise = Math.sin((i + this.position*0.005 + off) * 0.005) * 80;
-                ctx.lineTo(i, (h/2) - 50 - Math.abs(noise));
+            // =================================================================
+            // 3. OBJETOS E INIMIGOS (SPAWN & LOGIC)
+            // =================================================================
+            // Spawn Obstáculos
+            if(Math.random() < 0.025 && this.speed > 5) {
+                const type = Math.random() < 0.3 ? 'sign' : 'cone';
+                let obsX = (Math.random() * 2.0) - 1.0;
+                if(type === 'sign') obsX = (Math.random() < 0.5 ? -1.6 : 1.6);
+                this.obs.push({ x: obsX, z: 3000, type: type, hit: false });
             }
-            ctx.lineTo(w, h/2);
+
+            // Spawn Inimigos (Competição)
+            // Mantém sempre 3 inimigos na frente para perseguir
+            if(this.enemies.length < 3) {
+                this.enemies.push({
+                    x: (Math.random() * 1.5) - 0.75,
+                    z: 2000 + (Math.random() * 2000), // Spawna lá na frente
+                    speed: this.speed * (0.8 + Math.random() * 0.15), // Mais lentos que o player no max speed
+                    color: ['#e67e22', '#2980b9', '#2ecc71', '#f1c40f'][Math.floor(Math.random()*4)],
+                    laneChange: (Math.random() - 0.5) * 0.02,
+                    passed: false
+                });
+            }
+
+            // Atualiza Objetos
+            // Z diminui baseado na velocidade do player (objetos vêm em direção à câmera)
+            
+            // Obstáculos
+            this.obs.forEach((o, i) => {
+                o.z -= this.speed * 2.0; // Velocidade relativa do mundo
+                if(o.z < -500) this.obs.splice(i, 1);
+            });
+
+            // Inimigos
+            this.enemies.forEach((e, i) => {
+                // Inimigos se movem! Velocidade relativa = SpeedPlayer - SpeedEnemy
+                e.z -= (this.speed - e.speed) * 2.0;
+                
+                // IA Simples de Inimigo
+                e.x += e.laneChange;
+                if(e.x > 0.8) e.laneChange = -0.015;
+                if(e.x < -0.8) e.laneChange = 0.015;
+
+                // Ultrapassagem
+                if(e.z < 0 && !e.passed) {
+                    e.passed = true;
+                    this.enemiesPassed++;
+                    this.rank = Math.max(1, 8 - this.enemiesPassed); // Rank melhora
+                    window.System.msg(`POSIÇÃO ${this.rank}º`);
+                    window.Sfx.coin();
+                }
+
+                // Remove se ficar muito pra trás
+                if(e.z < -1000) this.enemies.splice(i, 1);
+            });
+
+            // =================================================================
+            // 4. RENDERIZAÇÃO (ESTILO V5)
+            // =================================================================
+            
+            // Céu
+            const gradSky = ctx.createLinearGradient(0, 0, 0, horizon);
+            gradSky.addColorStop(0, "#0099ff"); gradSky.addColorStop(1, "#87CEEB");
+            ctx.fillStyle = gradSky; ctx.fillRect(0, 0, w, horizon);
+
+            // Montanhas Parallax
+            ctx.fillStyle = 'rgba(255,255,255,0.8)'; // Nuvens
+            const bgX = this.steer * 80 + (this.curve * 150); // Move com a curva
+            
+            const drawCloud = (cloudX, cloudY, s) => { 
+                ctx.beginPath(); ctx.arc(cloudX, cloudY, 30*s, 0, Math.PI*2); 
+                ctx.arc(cloudX+25*s, cloudY-10*s, 35*s, 0, Math.PI*2); 
+                ctx.arc(cloudX+50*s, cloudY, 30*s, 0, Math.PI*2); ctx.fill(); 
+            };
+            drawCloud(w*0.2 - bgX, horizon*0.6, 1.2); 
+            drawCloud(w*0.8 - bgX, horizon*0.4, 0.8);
+
+            // Montanha Verde
+            ctx.fillStyle = '#2ecc71'; 
+            ctx.beginPath(); ctx.moveTo(0, horizon);
+            ctx.quadraticCurveTo(w*0.3, horizon - 50, w*0.6, horizon);
+            ctx.quadraticCurveTo(w*0.8, horizon - 80, w, horizon);
+            ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.fill();
+
+            // Chão (Grama)
+            ctx.fillStyle = '#32cd32'; ctx.fillRect(0, horizon, w, h);
+
+            // PISTA (PROJEÇÃO TRAPEZOIDAL - MODO 7 FAKE)
+            const roadW_Far = w * 0.01; 
+            const roadW_Near = w * 2.2; // Bem larga na base
+            const roadCurveVis = this.curve * (w * 0.7); // Curva visual na tela
+
+            // Zebras (Efeito de velocidade)
+            const zebraSize = w * 0.35; 
+            const segmentSize = 40; 
+            const segmentPhase = Math.floor(this.pos / segmentSize) % 2;
+            
+            ctx.fillStyle = (segmentPhase === 0) ? '#ff0000' : '#ffffff';
+            ctx.beginPath();
+            ctx.moveTo(cx + roadCurveVis - roadW_Far - (zebraSize*0.05), horizon);
+            ctx.lineTo(cx + roadCurveVis + roadW_Far + (zebraSize*0.05), horizon);
+            ctx.lineTo(cx + roadW_Near + zebraSize, h);
+            ctx.lineTo(cx - roadW_Near - zebraSize, h);
             ctx.fill();
 
-            // B. ESTRADA 3D
-            let x = 0;
-            let ddx = -(playerSeg.curve * Util.percentRemaining(this.position, CONF.SEGMENT_LENGTH));
-            let maxY = h;
-            const camY = CONF.CAMERA_HEIGHT;
-
-            for(let n=0; n<CONF.DRAW_DISTANCE; n++) {
-                const segIdx = (playerSeg.index + n) % segments.length;
-                const seg = segments[segIdx];
-                const looped = seg.index < playerSeg.index;
-                
-                Util.project(seg.p1, (this.playerX * CONF.ROAD_WIDTH) - x,       camY, this.position - (looped?this.trackLength:0), w, h, CONF.CAMERA_DEPTH);
-                Util.project(seg.p2, (this.playerX * CONF.ROAD_WIDTH) - x - ddx, camY, this.position - (looped?this.trackLength:0), w, h, CONF.CAMERA_DEPTH);
-
-                x += ddx; ddx += seg.curve;
-
-                if(seg.p1.camera.z <= CONF.CAMERA_DEPTH || seg.p2.screen.y >= maxY) continue;
-
-                // Desenha Grama
-                ctx.fillStyle = seg.color.grass;
-                ctx.fillRect(0, seg.p2.screen.y, w, seg.p1.screen.y - seg.p2.screen.y);
-
-                // Desenha Zebra
-                this.poly(ctx, seg.p1.screen.x, seg.p1.screen.y, seg.p1.screen.w, seg.p2.screen.x, seg.p2.screen.y, seg.p2.screen.w, seg.color.rumble);
-                
-                // Desenha Estrada
-                const rW1 = seg.p1.screen.w * 0.8; const rW2 = seg.p2.screen.w * 0.8;
-                this.poly(ctx, seg.p1.screen.x, seg.p1.screen.y, rW1, seg.p2.screen.x, seg.p2.screen.y, rW2, seg.color.road);
-
-                // Faixa
-                if(seg.color.lane) this.poly(ctx, seg.p1.screen.x, seg.p1.screen.y, rW1*0.02, seg.p2.screen.x, seg.p2.screen.y, rW2*0.02, seg.color.lane);
-
-                maxY = seg.p1.screen.y;
-            }
-
-            // C. SPRITES (De trás para frente)
-            for(let n=CONF.DRAW_DISTANCE-1; n>0; n--) {
-                const segIdx = (playerSeg.index + n) % segments.length;
-                const seg = segments[segIdx];
-                const scale = seg.p1.screen.scale;
-
-                // Rivais
-                cars.forEach(car => {
-                    if(Math.floor(car.z / CONF.SEGMENT_LENGTH) % segments.length === segIdx) {
-                        const sX = seg.p1.screen.x + (car.offset * seg.p1.screen.w * 2);
-                        const sY = seg.p1.screen.y;
-                        this.drawRival(ctx, sX, sY, scale * w * 0.003, car.color);
-                    }
-                });
-
-                // Árvores
-                seg.sprites.forEach(s => {
-                    const sX = seg.p1.screen.x + (s.offset * seg.p1.screen.w * 3);
-                    const sY = seg.p1.screen.y;
-                    this.drawTree(ctx, sX, sY, scale * w * 0.003);
-                });
-            }
-
-            // D. INTERFACE
-            this.drawWheel(ctx, w, h);
-            this.drawHUD(ctx, w, h);
-        },
-
-        poly: function(ctx, x1, y1, w1, x2, y2, w2, color) {
-            ctx.fillStyle = color;
+            // Asfalto
+            ctx.fillStyle = '#555'; 
             ctx.beginPath();
-            ctx.moveTo(x1-w1, y1); ctx.lineTo(x2-w2, y2); ctx.lineTo(x2+w2, y2); ctx.lineTo(x1+w1, y1); ctx.fill();
-        },
+            ctx.moveTo(cx + roadCurveVis - roadW_Far, horizon);
+            ctx.lineTo(cx + roadCurveVis + roadW_Far, horizon);
+            ctx.lineTo(cx + roadW_Near, h);
+            ctx.lineTo(cx - roadW_Near, h);
+            ctx.fill();
 
-        drawTree: function(ctx, x, y, scale) {
-            const w = 200*scale; const h = 300*scale;
-            ctx.save(); ctx.translate(x, y);
-            ctx.fillStyle = '#8B4513'; ctx.fillRect(-w/10, -h, w/5, h);
-            ctx.fillStyle = '#228B22'; ctx.beginPath(); ctx.arc(0, -h*0.9, w*0.8, 0, Math.PI*2); ctx.fill();
-            ctx.restore();
-        },
-
-        drawRival: function(ctx, x, y, scale, color) {
-            const w = 80*scale; const h = 60*scale;
-            ctx.save(); ctx.translate(x, y);
-            ctx.fillStyle = color; ctx.fillRect(-w/2, -h, w, h*0.6);
-            ctx.fillStyle = '#111'; ctx.fillRect(-w*0.6, -h*0.4, w*0.2, h*0.4); ctx.fillRect(w*0.4, -h*0.4, w*0.2, h*0.4);
-            ctx.restore();
-        },
-
-        drawWheel: function(ctx, w, h) {
-            if(this.wheel.opacity <= 0.01) return;
-            const cx = (this.hands.lx + this.hands.rx) / 2;
-            const cy = (this.hands.ly + this.hands.ry) / 2;
-            const r = Math.hypot(this.hands.lx - this.hands.rx, this.hands.ly - this.hands.ry) / 2;
-
-            ctx.save();
-            ctx.globalAlpha = this.wheel.opacity;
-            ctx.translate(cx, cy);
-            ctx.rotate(this.wheel.angle);
-
-            // Aro
-            ctx.lineWidth = 15; ctx.strokeStyle = '#222'; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke();
-            // Grips Azuis
-            ctx.fillStyle = '#3498db';
-            ctx.beginPath(); ctx.arc(-r*0.9, 0, r*0.15, 0, Math.PI*2); ctx.fill(); 
-            ctx.beginPath(); ctx.arc(r*0.9, 0, r*0.15, 0, Math.PI*2); ctx.fill();
-            // Marcador Vermelho
-            ctx.fillStyle = '#ff0000'; ctx.fillRect(-5, -r-5, 10, 20);
-            
-            ctx.restore();
-            ctx.globalAlpha = 1;
-        },
-
-        drawHUD: function(ctx, w, h) {
-            // Velocímetro
-            ctx.font = "italic bold 60px 'Russo One'";
-            ctx.textAlign = "right"; ctx.fillStyle = "#fff"; ctx.strokeStyle="#000"; ctx.lineWidth=3;
-            const spd = Math.floor(this.speed);
-            ctx.strokeText(spd, w-30, h-40); ctx.fillText(spd, w-30, h-40);
-            ctx.font = "20px Arial"; ctx.fillText("KM/H", w-30, h-20);
-
-            // Rank
-            ctx.textAlign="left"; ctx.font="bold 80px 'Russo One'";
-            ctx.fillStyle = this.rank===1 ? '#ffd700' : '#fff';
-            ctx.strokeText(this.rank+"º", 30, h-40); ctx.fillText(this.rank+"º", 30, h-40);
-
-            // Aviso
-            if(!this.hands.active) {
-                ctx.fillStyle="rgba(0,0,0,0.6)"; ctx.fillRect(0, h/2-40, w, 80);
-                ctx.fillStyle="#fff"; ctx.textAlign="center"; ctx.font="30px Arial";
-                ctx.fillText("LEVANTE AS MÃOS", w/2, h/2+10);
+            // Speed Lines (Textura de velocidade no asfalto)
+            if(this.speed > 1) {
+                ctx.strokeStyle = 'rgba(0,0,0,0.15)'; ctx.lineWidth = 4;
+                ctx.beginPath();
+                const lines = 4; const offset = (this.pos % 100) / 100;
+                for(let i=0; i<lines; i++) {
+                    const depth = (i + offset) / lines; 
+                    const y = horizon + (h-horizon) * (depth*depth); // Perspectiva quadrática
+                    const widthAtY = roadW_Far + (roadW_Near-roadW_Far) * (depth*depth);
+                    const centerAtY = cx + roadCurveVis * (1-depth);
+                    ctx.moveTo(centerAtY - widthAtY, y); ctx.lineTo(centerAtY + widthAtY, y);
+                }
+                ctx.stroke();
             }
+
+            // Faixa Central
+            ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = w * 0.015;
+            ctx.setLineDash([h * 0.1, h * 0.15]); ctx.lineDashOffset = -this.pos * 1.5;
+            ctx.beginPath();
+            ctx.moveTo(cx + roadCurveVis, horizon);
+            ctx.quadraticCurveTo(cx + (roadCurveVis * 0.3), h * 0.7, cx, h);
+            ctx.stroke(); ctx.setLineDash([]);
+
+            // =================================================================
+            // 5. RENDERIZAÇÃO DE OBJETOS (Z-SORTING)
+            // =================================================================
+            let drawQueue = [];
+            
+            // Adiciona Obstáculos
+            this.obs.forEach((o, i) => drawQueue.push({ type: o.type, obj: o, z: o.z }));
+            // Adiciona Inimigos
+            this.enemies.forEach((e, i) => drawQueue.push({ type: 'kart', obj: e, z: e.z }));
+            
+            // Ordena do fundo para frente (Painter's Algorithm)
+            drawQueue.sort((a, b) => b.z - a.z);
+
+            drawQueue.forEach(item => {
+                const o = item.obj;
+                const scale = 500 / (o.z + 500); // Escala de perspectiva
+
+                if(scale > 0 && o.z < 3500) { // Render distance
+                    // Posição X na tela: Centro + Curva + Offset Lateral do Objeto
+                    const screenX = cx + (this.curve * w * 0.8 * (o.z/3000)) + (o.x * w * 0.7 * scale);
+                    const screenY = horizon + (30 * scale);
+                    const size = (w * 0.18) * scale;
+                    
+                    // Colisão Simples (Z perto, X perto)
+                    let hit = false;
+                    if(o.z < 100 && o.z > -100 && Math.abs(this.x - o.x) < 0.45 && !o.hit) hit = true;
+
+                    if(item.type === 'cone') {
+                        ctx.fillStyle = '#ff6b6b'; ctx.beginPath(); 
+                        ctx.moveTo(screenX, screenY - size);
+                        ctx.lineTo(screenX - size*0.3, screenY); 
+                        ctx.lineTo(screenX + size*0.3, screenY); ctx.fill();
+                        
+                        if(hit) { 
+                            o.hit = true; this.speed *= 0.8; this.health -= 5; 
+                            window.Sfx.crash(); window.Gfx.shake(10); 
+                            this.obs.splice(this.obs.indexOf(o), 1); 
+                        }
+                    } 
+                    else if(item.type === 'kart') {
+                        // Desenha Inimigo (Sprite Simples)
+                        const kScale = scale * w * 0.005;
+                        ctx.save(); ctx.translate(screenX, screenY); ctx.scale(kScale, kScale);
+                        
+                        // Sombra
+                        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(0, 10, 30, 8, 0, 0, Math.PI*2); ctx.fill();
+                        // Corpo
+                        ctx.fillStyle = o.color; ctx.fillRect(-20, -15, 40, 20);
+                        // Rodas
+                        ctx.fillStyle = '#222'; ctx.fillRect(-22, -5, 8, 15); ctx.fillRect(14, -5, 8, 15);
+                        // Capacete
+                        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, -20, 12, 0, Math.PI*2); ctx.fill();
+                        
+                        ctx.restore();
+
+                        if(hit) { 
+                            o.hit = true; this.speed = 0; this.health -= 20; 
+                            window.Sfx.crash(); window.Gfx.shake(30); 
+                            o.z -= 500; // Joga ele pra trás
+                        }
+                    }
+                    else if(item.type === 'sign') {
+                        const hSign = size * 2;
+                        ctx.fillStyle = '#555'; ctx.fillRect(screenX-2*scale, screenY-hSign, 4*scale, hSign);
+                        ctx.fillStyle = '#f1c40f'; ctx.beginPath(); 
+                        ctx.moveTo(screenX - size*0.8, screenY - hSign); 
+                        ctx.lineTo(screenX + size*0.8, screenY - hSign); 
+                        ctx.lineTo(screenX, screenY - hSign - size); ctx.fill();
+                        
+                        if(hit) { 
+                            o.hit = true; this.speed *= 0.5; this.health -= 15; 
+                            window.Sfx.crash(); window.Gfx.shake(20); 
+                            this.obs.splice(this.obs.indexOf(o), 1); 
+                        }
+                    }
+                }
+            });
+
+            // =================================================================
+            // 6. PLAYER KART (SPRITE V5 RESTAURADO)
+            // =================================================================
+            const carScale = w * 0.0055;
+            const carX = cx + (this.x * w * 0.3); // O carro se move um pouco lateralmente
+            const carY = h * 0.88 + this.bounce;
+            
+            ctx.save(); 
+            ctx.translate(carX, carY); 
+            ctx.scale(carScale, carScale); 
+            ctx.rotate(this.visualTilt * 0.15); // Inclina nas curvas
+
+            // Partículas de Pneu
+            if(Math.abs(this.steer) > 0.8 && this.speed > 50) {
+                const color = (Math.floor(Date.now()/100)%2===0) ? '#ffcc00' : '#ff3300'; // Fagulhas de drift
+                if(Math.random()<0.5) { 
+                    particles.push({x: carX - 30, y: carY+20, vx: -2, vy: 2, s: 5, c: color, l: 20}); 
+                    particles.push({x: carX + 30, y: carY+20, vx: 2, vy: 2, s: 5, c: color, l: 20}); 
+                }
+            }
+            if(isOffRoad) {
+                particles.push({x: carX, y: carY+10, vx: (Math.random()-0.5)*5, vy: 5, s: 8, c: '#8B4513', l: 30});
+            }
+
+            // Desenho do Kart (Retro Vector Style)
+            // Sombra
+            ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(0, 25, 50, 15, 0, 0, Math.PI*2); ctx.fill();
+            // Rodas Traseiras
+            ctx.fillStyle = '#111'; ctx.fillRect(-50, 5, 25, 25); ctx.fillRect(25, 5, 25, 25);
+            // Calotas
+            ctx.fillStyle = '#ddd'; ctx.fillRect(-45, 10, 15, 15); ctx.fillRect(30, 10, 15, 15);
+            // Motor
+            ctx.fillStyle = '#333'; ctx.fillRect(-25, 20, 50, 15);
+            // Escapamentos
+            ctx.fillStyle = '#777'; 
+            ctx.beginPath(); ctx.arc(-15, 30, 6, 0, Math.PI*2); ctx.fill(); 
+            ctx.beginPath(); ctx.arc(15, 30, 6, 0, Math.PI*2); ctx.fill(); 
+            // Chassi (Gradiente Vermelho)
+            const bodyGrad = ctx.createLinearGradient(-30, -20, 30, 20); bodyGrad.addColorStop(0, '#ff0000'); bodyGrad.addColorStop(1, '#cc0000');
+            ctx.fillStyle = bodyGrad; 
+            ctx.beginPath(); ctx.moveTo(-20, -50); ctx.lineTo(20, -50); ctx.lineTo(35, 10); ctx.lineTo(40, 25); ctx.lineTo(-40, 25); ctx.lineTo(-35, 10); ctx.fill();
+            // Volante (base)
+            ctx.fillStyle = '#222'; ctx.beginPath(); ctx.ellipse(0, 0, 20, 15, 0, 0, Math.PI*2); ctx.fill();
+
+            // Cockpit e Piloto (Gira com o volante)
+            ctx.save(); ctx.rotate(this.steer * 0.5); 
+            ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, -25, 18, 0, Math.PI*2); ctx.fill(); // Capacete
+            ctx.fillStyle = '#ff0000'; ctx.font="bold 12px Arial"; ctx.textAlign="center"; ctx.fillText("M", 0, -32); // Logo
+            ctx.fillStyle = '#333'; ctx.fillRect(-12, -28, 24, 8); // Visor
+            ctx.restore();
+
+            // Rodas Frente (Giram com o volante)
+            ctx.fillStyle = '#111';
+            ctx.save(); ctx.translate(-35, -35); ctx.rotate(this.steer * 0.6); ctx.fillRect(-8, -10, 16, 20); ctx.restore();
+            ctx.save(); ctx.translate(35, -35); ctx.rotate(this.steer * 0.6); ctx.fillRect(-8, -10, 16, 20); ctx.restore();
+            
+            ctx.restore(); // Fim do Carro
+
+            // Renderiza Partículas
+            particles.forEach((p, i) => { 
+                p.x += p.vx; p.y += p.vy; p.l--; 
+                if(p.l <= 0) particles.splice(i, 1); 
+                else { ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, p.s, 0, Math.PI*2); ctx.fill(); } 
+            });
+
+            // =================================================================
+            // 7. INTERFACE (HUD) & MINI-MAPA MELHORADO
+            // =================================================================
+            const hudX = w - 80; const hudY = h - 60;
+            
+            // Velocímetro
+            ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.beginPath(); ctx.arc(hudX, hudY, 50, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.stroke();
+            ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = "bold 36px 'Russo One'"; 
+            ctx.fillText(Math.floor(this.speed), hudX, hudY + 10);
+            ctx.font = "12px Arial"; ctx.fillText("KM/H", hudX, hudY + 30);
+            
+            // Barra de Vida
+            const hpW = w * 0.3;
+            ctx.fillStyle = '#333'; ctx.fillRect(cx - hpW/2, 20, hpW, 10);
+            const hpColor = this.health > 50 ? '#2ecc71' : '#e74c3c';
+            ctx.fillStyle = hpColor; ctx.fillRect(cx - hpW/2 + 2, 22, (hpW-4) * (this.health/100), 6);
+
+            // Posição (Rank)
+            ctx.fillStyle = "#fff"; ctx.font = "italic bold 60px 'Russo One'"; ctx.textAlign = "left";
+            ctx.shadowColor="black"; ctx.shadowBlur=10;
+            ctx.fillText(this.rank + "º", 20, h - 20);
+            ctx.shadowBlur=0;
+
+            // --- MINI-MAPA (NOVO: CLARO, OPACO, FUNCIONAL) ---
+            const mapW = 120; const mapH = 100;
+            const mapX = 20; const mapY = 20;
+            
+            // Fundo Opaco
+            ctx.fillStyle = "#111"; 
+            ctx.fillRect(mapX, mapY, mapW, mapH);
+            ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.strokeRect(mapX, mapY, mapW, mapH);
+
+            // Traçado da Pista (Previsão)
+            ctx.strokeStyle = "#0f0"; ctx.lineWidth = 3; ctx.beginPath();
+            const mapScaleX = 15;
+            const lookAhead = 4000; // Olha 4000 unidades a frente
+            const startMapX = mapX + mapW/2;
+            const startMapY = mapY + mapH - 10;
+            
+            ctx.moveTo(startMapX, startMapY);
+            
+            for(let i = 0; i < lookAhead; i+=100) {
+                // Calcula curvatura futura usando a mesma fórmula da física
+                const futureCurve = Math.sin((this.pos + i) * 0.002) * CONF.CURVE_FACTOR;
+                // Complexidade extra (igual física)
+                let modCurve = futureCurve;
+                if(Math.sin((this.pos+i) * 0.0005) > 0.5) modCurve *= 2;
+                if(Math.cos((this.pos+i) * 0.001) > 0.8) modCurve = 0;
+
+                const pointX = startMapX + (modCurve * mapScaleX);
+                const pointY = startMapY - (i / lookAhead) * mapH * 0.8;
+                
+                ctx.lineTo(pointX, pointY);
+            }
+            ctx.stroke();
+
+            // Ponto do Jogador
+            ctx.fillStyle = "#ff0000"; ctx.beginPath(); 
+            // O jogador se move lateralmente no mapa baseado no X real
+            ctx.arc(startMapX + (this.x * 5), startMapY, 4, 0, Math.PI*2); 
+            ctx.fill();
+
+            // Texto "MAP"
+            ctx.fillStyle = "#aaa"; ctx.font = "10px Arial"; ctx.fillText("TRACK", mapX+mapW/2, mapY+12);
+
+
+            // =================================================================
+            // 8. RENDERIZAÇÃO DE INPUT (VOLANTE VIRTUAL HOLOGRÁFICO)
+            // =================================================================
+            const drawGlove = (x, y, label) => {
+                const s = w * 0.06;
+                const grad = ctx.createRadialGradient(x, y, s*0.2, x, y, s);
+                grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#cccccc');
+                ctx.save(); ctx.shadowColor = '#3498db'; ctx.shadowBlur = 15;
+                ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#3498db'; ctx.beginPath(); ctx.arc(x, y, s*0.6, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#fff'; ctx.font = "bold 20px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle"; 
+                ctx.fillText(label, x, y);
+                ctx.restore();
+            };
+
+            if(this.inputState === 1) {
+                if(this.hands.left) drawGlove(this.hands.left.x, this.hands.left.y, "L");
+                if(this.hands.right) drawGlove(this.hands.right.x, this.hands.right.y, "R");
+                
+                ctx.fillStyle = "#fff"; ctx.font = "bold 24px Arial"; ctx.textAlign = "center";
+                ctx.shadowColor = "black"; ctx.shadowBlur = 5;
+                ctx.fillText("USE AS DUAS MÃOS!", cx, h * 0.2);
+                ctx.shadowBlur = 0;
+            }
+            else if (this.inputState === 2 && this.wheel.opacity > 0.05) {
+                ctx.save();
+                ctx.globalAlpha = this.wheel.opacity;
+                ctx.translate(this.wheel.x, this.wheel.y);
+                ctx.rotate(this.wheel.angle); // Usa o ângulo suavizado
+                
+                const r = this.wheel.radius;
+
+                // Volante Visual Detalhado
+                ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 30; ctx.shadowOffsetY = 15;
+                ctx.fillStyle = '#eee'; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI*2); ctx.fill(); // Aro externo
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.beginPath(); ctx.arc(0, 0, r * 0.75, 0, Math.PI*2); ctx.fill(); // Buraco
+                ctx.globalCompositeOperation = 'source-over';
+                
+                // Grips Laterais
+                ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+                ctx.fillStyle = '#3498db'; 
+                ctx.beginPath(); ctx.arc(-r*0.9, 0, r*0.15, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(r*0.9, 0, r*0.15, 0, Math.PI*2); ctx.fill();
+
+                // Centro e Hastes
+                ctx.fillStyle = '#333'; ctx.beginPath(); ctx.arc(0, 0, r*0.25, 0, Math.PI*2); ctx.fill();
+                ctx.fillRect(-r*0.8, -10, r*1.6, 20); // Haste horizontal
+
+                // Marcador de Centro
+                ctx.fillStyle = '#e74c3c'; ctx.fillRect(-5, -r, 10, 20);
+
+                ctx.restore();
+            }
+
+            // Game Over Check
+            if(this.health <= 0) window.System.gameOver(this.score);
+
+            return this.score;
         }
     };
 
-    // --- REGISTRO NO MENU ---
-    const loop = setInterval(() => {
+    // --- REGISTRO DO JOGO (INTEGRAÇÃO OTTO V8) ---
+    // Registra usando o novo padrão do Core.js (ID, MetaData, LogicObject)
+    const registerLoop = setInterval(() => {
         if(window.System && window.System.registerGame) {
-            window.System.registerGame(GAME_ID, { name:'Otto Kart', icon:'🏎️', camOpacity:0.3 }, Logic);
-            clearInterval(loop);
+            window.System.registerGame('kart', { 
+                name: 'Otto Kart V5', 
+                icon: '🏎️', 
+                camOpacity: 0.4, 
+                showWheel: false 
+            }, Logic);
+            clearInterval(registerLoop);
         }
     }, 100);
 
