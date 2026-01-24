@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Mario Kart Wii: Web Remaster</title>
     
-    <!-- External Libs -->
+    <!-- External Libs (TensorFlow & Tailwind) -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- Google Fonts -->
+    <!-- Styles -->
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;700;900&family=Russo+One&display=swap');
         
@@ -58,7 +58,7 @@
 
     <!-- UI Layer -->
     <div id="ui-layer">
-        <div id="loader">CARREGANDO ENGINE V8...</div>
+        <div id="loader">CARREGANDO SISTEMA...</div>
         
         <div id="game-hud" class="hidden">
             <!-- Speedometer -->
@@ -100,34 +100,43 @@
         </div>
     </div>
 
-    <!-- MODULE LOADING ORDER -->
-    <script type="module">
-        // Firebase Setup (Global Scope for simplicity in this architecture)
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-        import { getDatabase, ref, set, push, onValue, query, orderByChild, limitToLast } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
-        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+    <!-- 
+       LOAD ORDER:
+       1. Firebase Module (Async) - Configura window.CoreFB
+       2. Game Modules (Sync/Defer) - Usam window.CoreFB
+    -->
 
-        // Expose Firebase to window for legacy support
-        window.FB = { initializeApp, getDatabase, ref, set, push, onValue, query, orderByChild, limitToLast, getAuth, signInAnonymously };
-    </script>
+    <!-- Firebase Core com type="module" para suportar imports ES6 -->
+    <script type="module" src="core/firebase.js"></script>
 
-    <!-- CORE SYSTEM -->
-    <script src="core/firebase.js"></script>
+    <!-- Shared Modules -->
     <script src="shared/constants.js"></script>
     <script src="shared/utils.js"></script>
     
-    <!-- KART ENGINE MODULES -->
+    <!-- Game Engine -->
     <script src="games/kart/physics.js"></script>
     <script src="games/kart/rendering.js"></script>
     <script src="games/kart/minimap.js"></script>
     <script src="games/kart/ranking.js"></script>
     <script src="games/kart/main.js"></script>
 
+    <!-- Bootstrap -->
     <script>
-        // BOOTSTRAP
         window.onload = () => {
-            window.Game.init();
+            // Aguarda um momento para garantir que o módulo Firebase e outros scripts carregaram
+            console.log("Sistema iniciado. Aguardando módulos...");
+            
+            setTimeout(() => {
+                if (window.Game) {
+                    window.Game.init();
+                } else {
+                    document.getElementById('loader').innerText = "ERRO: ENGINE NÃO CARREGADA";
+                    console.error("Game object not found in window.");
+                }
+            }, 800);
         };
     </script>
 </body>
 </html>
+
+
