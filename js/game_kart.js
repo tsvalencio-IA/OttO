@@ -1,16 +1,14 @@
 // =============================================================================
-// KART DO OTTO – DEFINITIVE PLATINUM EDITION (NO-LAG & VISUAL WHEEL FIXED)
-// ENGINEER: CODE 177 | ARCHITECTURE: NINTENDO STYLE LOOP
-// STATUS: 
-// 1. VOLANTE 3D: FORÇADO NO HUD (VISUALIZAÇÃO IMEDIATA)
-// 2. ANTI-FREEZE: GARBAGE COLLECTION DE PARTÍCULAS E NETCODE OTIMIZADO
-// 3. OFFLINE/ONLINE: HÍBRIDO PERFEITO
+// KART DO OTTO – FINAL PLATINUM EDITION (FIXED)
+// 1. VOLANTE: FORÇADO NO HUD (VISÍVEL)
+// 2. ANTI-LAG: GARBAGE COLLECTION DE PARTÍCULAS
+// 3. OFFLINE/ONLINE: SEPARAÇÃO TOTAL
 // =============================================================================
 
 (function() {
 
     // -----------------------------------------------------------------
-    // 1. DADOS ESTÁTICOS & CONFIGURAÇÃO
+    // 1. CONFIGURAÇÕES
     // -----------------------------------------------------------------
     const CHARACTERS = [
         { id: 0, name: 'OTTO', color: '#e74c3c', speedInfo: 1.0, turnInfo: 1.0, desc: 'Equilibrado' },
@@ -36,13 +34,13 @@
         CRASH_PENALTY: 0.55,
         DEADZONE: 0.05,
         INPUT_SMOOTHING: 0.22,
-        TURBO_ZONE_Y: 0.35, // Altura para ativar turbo (mãos pra cima)
+        TURBO_ZONE_Y: 0.35,
         DRAW_DISTANCE: 60
     };
 
-    // Variáveis de Escopo Seguro
+    // Variáveis Seguras (Anti-Memória Leak)
     let minimapPoints = [];
-    let particles = []; // Otimizado para não travar
+    let particles = []; 
     let nitroBtn = null;
     let lapPopupTimer = 0;
     let lapPopupText = "";
@@ -52,7 +50,6 @@
     let segments = [];
     let trackLength = 0;
 
-    // Segmento Dummy para evitar crash
     const DUMMY_SEG = { curve: 0, y: 0, color: 'light', obs: [], theme: 'grass' };
 
     function getSegment(index) {
@@ -71,41 +68,34 @@
     }
 
     // -----------------------------------------------------------------
-    // 2. LÓGICA PRINCIPAL (GAME STATE)
+    // 2. LÓGICA DO JOGO
     // -----------------------------------------------------------------
     const Logic = {
-        state: 'MODE_SELECT', // MODE_SELECT -> LOBBY -> WAITING -> RACE -> FINISHED
+        state: 'MODE_SELECT',
         roomId: 'room_01',
         
-        // Seleção e Lobby
         selectedChar: 0,
         selectedTrack: 0,
         isReady: false,
         isOnline: false,
         
-        // Multiplayer Sync
         dbRef: null,
         lastSync: 0,
         autoStartTimer: null,
 
-        // Física do Veículo
         speed: 0, pos: 0, playerX: 0, steer: 0, targetSteer: 0,
         nitro: 100, turboLock: false,
         driftState: 0, driftDir: 0, driftCharge: 0, mtStage: 0, boostTimer: 0,    
         
-        // Progresso
         lap: 1, totalLaps: 3, time: 0, rank: 1, score: 0, finishTimer: 0,
-        
-        // Visual & Input
         visualTilt: 0, bounce: 0, skyColor: 0, 
         inputState: 0, gestureTimer: 0,
         
-        // O Volante Virtual (Coordenadas de tela para desenho)
+        // Volante Virtual
         virtualWheel: { x:0, y:0, r:0, opacity:0 },
-        
-        rivals: [], // Lista de oponentes
+        rivals: [],
 
-        // --- SETUP DE UI ---
+        // --- SETUP UI ---
         setupUI: function() {
             const old = document.getElementById('nitro-btn-kart');
             if(old) old.remove();
@@ -137,7 +127,7 @@
             nitroBtn.addEventListener('mousedown', toggleTurbo);
             document.getElementById('game-ui').appendChild(nitroBtn);
 
-            // INPUT DE MENU (CLIQUES)
+            // Inputs de Menu
             window.System.canvas.onclick = (e) => {
                 const rect = window.System.canvas.getBoundingClientRect();
                 const y = e.clientY - rect.top;
@@ -165,7 +155,6 @@
             };
         },
 
-        // --- CONSTRUÇÃO DE PISTA ---
         buildTrack: function(trackId) {
             segments = [];
             const trkConfig = TRACKS[trackId];
@@ -195,15 +184,13 @@
             buildMiniMap(segments);
         },
 
-        // -------------------------------------------------------------
-        // INIT & CLEANUP (EVITA MEMORY LEAK)
-        // -------------------------------------------------------------
+        // --- LIMPEZA DE MEMÓRIA (CRUCIAL PARA NÃO TRAVAR) ---
         init: function() { 
             this.cleanup();
             this.state = 'MODE_SELECT';
             this.setupUI();
             this.resetPhysics();
-            particles = []; // Zera array
+            particles = []; 
             window.System.msg("SELECIONE O MODO");
         },
 
@@ -220,9 +207,7 @@
             particles = [];
         },
 
-        // -------------------------------------------------------------
-        // MULTIPLAYER E LOBBY
-        // -------------------------------------------------------------
+        // --- LOBBY ---
         selectMode: function(mode) {
             this.resetPhysics();
             if (mode === 'OFFLINE') {
@@ -297,15 +282,12 @@
 
         toggleReady: function() {
             if (this.state !== 'LOBBY') return;
-            
             if (!this.isOnline) {
                 this.startRace(this.selectedTrack);
                 return;
             }
-
             this.isReady = !this.isReady;
             window.Sfx.click();
-            
             if (this.isReady) {
                 this.state = 'WAITING';
                 window.System.msg("AGUARDANDO...");
@@ -337,9 +319,6 @@
             window.System.canvas.onclick = null;
         },
 
-        // -------------------------------------------------------------
-        // UPDATE LOOP PRINCIPAL (ANTI-LAG)
-        // -------------------------------------------------------------
         update: function(ctx, w, h, pose) {
             if (this.state === 'MODE_SELECT') { this.renderModeSelect(ctx, w, h); return; }
             if (this.state === 'LOBBY' || this.state === 'WAITING') { this.renderLobby(ctx, w, h); return; }
@@ -356,8 +335,7 @@
         },
 
         syncMultiplayer: function() {
-            // THROTTLE: Limita atualizações para evitar saturação (80ms)
-            if (Date.now() - this.lastSync > 80) {
+            if (Date.now() - this.lastSync > 80) { // Throttle 80ms
                 this.lastSync = Date.now();
                 this.dbRef.child('players/' + window.System.playerId).update({
                     pos: Math.floor(this.pos),
@@ -368,22 +346,20 @@
             }
         },
 
-        // -------------------------------------------------------------
-        // FÍSICA E INPUT (VOLANTE VISÍVEL AGORA)
-        // -------------------------------------------------------------
+        // --- FÍSICA E INPUT (VOLANTE CORRIGIDO) ---
         updatePhysics: function(w, h, pose) {
             const d = Logic;
             const charStats = CHARACTERS[this.selectedChar];
             
-            // 1. INPUT
             let detected = 0;
             let pLeft = null, pRight = null;
 
+            // Detector de Mãos
             if (d.state === 'RACE' && pose && pose.keypoints) {
                 const lw = pose.keypoints.find(k => k.name === 'left_wrist');
                 const rw = pose.keypoints.find(k => k.name === 'right_wrist');
                 
-                // Diminuí o threshold de confiança (0.25) para pegar mais fácil
+                // Threshold 0.25 para pegar melhor
                 if (lw && lw.score > 0.25) { pLeft = window.Gfx.map(lw, w, h); detected++; }
                 if (rw && rw.score > 0.25) { pRight = window.Gfx.map(rw, w, h); detected++; }
                 
@@ -399,7 +375,7 @@
                 }
             }
 
-            // 2. CÁLCULO DO VOLANTE VIRTUAL (CORREÇÃO DE VISIBILIDADE)
+            // ATUALIZA VOLANTE VIRTUAL
             if (detected === 2) {
                 d.inputState = 2;
                 const dx = pRight.x - pLeft.x; 
@@ -408,21 +384,21 @@
                 
                 d.targetSteer = (Math.abs(rawAngle) > CONF.DEADZONE) ? rawAngle * 2.5 : 0;
                 
-                // ATUALIZA E FORÇA VISIBILIDADE
+                // FORÇA VISIBILIDADE IMEDIATA
                 d.virtualWheel.x = (pLeft.x + pRight.x) / 2; 
                 d.virtualWheel.y = (pLeft.y + pRight.y) / 2;
                 d.virtualWheel.r = Math.max(40, Math.hypot(dx, dy) / 2);
-                d.virtualWheel.opacity = 1.0; // ALPHA 100% QUANDO DETECTADO
+                d.virtualWheel.opacity = 1.0; 
             } else {
                 d.inputState = 0; 
                 d.targetSteer = 0; 
-                d.virtualWheel.opacity *= 0.9; // FADE OUT SUAVE
+                d.virtualWheel.opacity *= 0.9; 
             }
             
             d.steer += (d.targetSteer - d.steer) * CONF.INPUT_SMOOTHING;
             d.steer = Math.max(-1.5, Math.min(1.5, d.steer));
 
-            // 3. CARRO
+            // Física Carro
             let currentMax = CONF.MAX_SPEED * charStats.speedInfo;
             if (d.turboLock && d.nitro > 0) {
                 currentMax = CONF.TURBO_MAX_SPEED; d.nitro -= 0.6;
@@ -436,7 +412,6 @@
             else d.speed *= CONF.FRICTION;
 
             if (Math.abs(d.playerX) > 2.2) d.speed *= CONF.OFFROAD_DECEL;
-
             if (isNaN(d.speed)) d.speed = 0;
             if (isNaN(d.playerX)) d.playerX = 0;
 
@@ -473,7 +448,7 @@
                 }
             }
 
-            // Colisão
+            // Colisões
             seg.obs.forEach(o => {
                 if(o.x < 10 && Math.abs(d.playerX - o.x) < 0.35 && Math.abs(d.playerX) < 4.0) {
                     d.speed *= CONF.CRASH_PENALTY; o.x = 999;
@@ -481,7 +456,6 @@
                 }
             });
 
-            // Loop
             d.pos += d.speed;
             while (d.pos >= trackLength) {
                 d.pos -= trackLength; d.lap++;
@@ -523,9 +497,6 @@
             }
         },
 
-        // -------------------------------------------------------------
-        // RENDERIZADOR (COM HARD CAP DE PARTÍCULAS)
-        // -------------------------------------------------------------
         renderWorld: function(ctx, w, h) {
             const d = Logic; const cx = w / 2; const horizon = h * 0.40;
             const currentSegIndex = Math.floor(d.pos / SEGMENT_LENGTH);
@@ -629,9 +600,8 @@
                 else { ctx.fillStyle=p.c; ctx.globalAlpha = p.l / 50; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1.0; } 
             });
             
-            // --- CORREÇÃO DE MEMÓRIA (ANTI-FREEZE) ---
-            // Remove partículas antigas se houver mais de 50 (Evita crash do browser)
-            if(particles.length > 50) particles = particles.slice(particles.length - 50);
+            // --- ANTI-FREEZE: Limita partículas ---
+            if(particles.length > 40) particles = particles.slice(particles.length - 40);
         },
 
         drawKartSprite: function(ctx, cx, y, carScale, steer, tilt, d, color) {
@@ -666,9 +636,6 @@
             ctx.restore(); ctx.restore(); 
         },
 
-        // -------------------------------------------------------------
-        // RENDERIZADOR UI (COM VOLANTE 3D VISÍVEL)
-        // -------------------------------------------------------------
         renderModeSelect: function(ctx, w, h) {
             ctx.fillStyle = "#2c3e50"; ctx.fillRect(0, 0, w, h);
             ctx.fillStyle = "white"; ctx.textAlign = "center"; ctx.font = "bold 40px 'Russo One'";
@@ -730,7 +697,7 @@
                     ctx.fillText(lapPopupText, w / 2, h * 0.45); ctx.restore(); lapPopupTimer--; 
                 }
                 
-                // HUD Base
+                // HUD
                 const hudX = w - 80; const hudY = h - 60; 
                 ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.arc(hudX, hudY, 55, 0, Math.PI * 2); ctx.fill();
                 const rpm = Math.min(1, d.speed / CONF.TURBO_MAX_SPEED); 
@@ -770,18 +737,19 @@
                     ctx.restore();
                 }
 
-                // --- VOLANTE VIRTUAL (CORREÇÃO FINAL DE VISIBILIDADE) ---
+                // --- AQUI ESTÁ A CORREÇÃO FINAL DO VOLANTE ---
+                // Desenhado POR ÚLTIMO para garantir que fica por cima
                 if (d.virtualWheel.opacity > 0.01) {
                     const vw = d.virtualWheel; 
                     ctx.save(); 
-                    ctx.globalAlpha = vw.opacity; // Usa a opacidade calculada (que agora é 1.0 quando detecta)
+                    ctx.globalAlpha = vw.opacity; 
                     ctx.translate(vw.x, vw.y);
                     
-                    // Aro Neon
+                    // Aro
                     ctx.lineWidth = 8; ctx.strokeStyle = '#222'; ctx.beginPath(); ctx.arc(0, 0, vw.r, 0, Math.PI * 2); ctx.stroke();
                     ctx.lineWidth = 4; ctx.strokeStyle = '#00ffff'; ctx.beginPath(); ctx.arc(0, 0, vw.r - 8, 0, Math.PI * 2); ctx.stroke();
                     
-                    // Direção
+                    // Marcador de Direção
                     ctx.rotate(d.steer * 1.4); 
                     ctx.fillStyle = '#ff3300'; ctx.fillRect(-4, -vw.r + 10, 8, 22);
                     
