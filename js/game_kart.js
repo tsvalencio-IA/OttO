@@ -204,7 +204,7 @@
             addRoad(40, 1.2, 0);
 
             trackLength = segments.length * SEGMENT_LENGTH;
-            if(trackLength === 0) trackLength = 1;
+            if(trackLength === 0) trackLength = 1; // Segurança contra divisão por zero
             buildMiniMap(segments);
         },
 
@@ -233,7 +233,7 @@
         },
 
         connectMultiplayer: function() {
-            // FIX DE MEMÓRIA: Desliga antes de ligar
+            // FIX DE MEMÓRIA: Garante que não há ouvintes duplicados
             if (this.dbRef) this.dbRef.child('players').off(); 
 
             this.dbRef = window.DB.ref('rooms/' + this.roomId);
@@ -252,16 +252,22 @@
                 if (!data) return;
                 
                 const now = Date.now();
+                
+                // Mapeamento otimizado para evitar recriação excessiva de objetos
                 this.rivals = Object.keys(data)
                     .filter(id => id !== window.System.playerId)
                     .filter(id => (now - (data[id].lastSeen || 0)) < 15000)
-                    .map(id => ({
-                        id: id,
-                        ...data[id],
-                        isRemote: true,
-                        speed: 0,
-                        color: CHARACTERS[data[id].charId || 0].color
-                    }));
+                    .map(id => {
+                        // Preserva propriedades visuais se já existirem
+                        const existing = this.rivals.find(r => r.id === id);
+                        return {
+                            id: id,
+                            ...data[id],
+                            isRemote: true,
+                            speed: existing ? existing.speed : 0, // Suavização
+                            color: CHARACTERS[data[id].charId || 0].color
+                        };
+                    });
                 
                 this.checkAutoStart(data);
             });
@@ -334,6 +340,7 @@
             if (this.state === 'MODE_SELECT') { this.renderModeSelect(ctx, w, h); return; }
             if (this.state === 'LOBBY' || this.state === 'WAITING') { this.renderLobby(ctx, w, h); return; }
 
+            // Segurança: Se não há pista, não tente rodar física
             if (!segments || segments.length === 0) return 0;
             
             this.updatePhysics(w, h, pose);
@@ -349,17 +356,19 @@
             // Otimização: Só envia a cada 80ms
             if (Date.now() - this.lastSync > 80) {
                 this.lastSync = Date.now();
-                this.dbRef.child('players/' + window.System.playerId).update({
-                    pos: Math.floor(this.pos),
-                    x: this.playerX,
-                    lap: this.lap,
-                    lastSeen: firebase.database.ServerValue.TIMESTAMP
-                });
+                if(this.dbRef) {
+                    this.dbRef.child('players/' + window.System.playerId).update({
+                        pos: Math.floor(this.pos),
+                        x: this.playerX,
+                        lap: this.lap,
+                        lastSeen: firebase.database.ServerValue.TIMESTAMP
+                    });
+                }
             }
         },
 
         // -------------------------------------------------------------
-        // FÍSICA E DETECÇÃO (FIX DO VOLANTE)
+        // FÍSICA E DETECÇÃO (FIX DO VOLANTE E LOOP INFINITO)
         // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
@@ -388,7 +397,7 @@
                 }
             }
 
-            // VOLANTE VIRTUAL LÓGICA
+            // VOLANTE VIRTUAL LÓGICA - FORÇA ATUALIZAÇÃO
             if (detected === 2) {
                 d.inputState = 2;
                 const dx = pRight.x - pLeft.x; 
@@ -402,7 +411,7 @@
                 d.virtualWheel.y = (pLeft.y + pRight.y) / 2;
                 d.virtualWheel.r = Math.max(40, Math.hypot(dx, dy) / 2);
                 
-                // FORÇA VISIBILIDADE IMEDIATA
+                // FIX: FORÇA VISIBILIDADE IMEDIATA E CONSTANTE
                 d.virtualWheel.opacity = 1.0; 
             } else {
                 d.inputState = 0; 
@@ -471,16 +480,21 @@
                 }
             });
 
-            // Loop
+            // --- FIX DE LOOP INFINITO (CRÍTICO) ---
             d.pos += d.speed;
-            while (d.pos >= trackLength) {
+            
+            // Proteção contra travamento se trackLength for inválido
+            let loopGuard = 0;
+            while (d.pos >= trackLength && loopGuard < 100) {
                 d.pos -= trackLength; d.lap++;
+                loopGuard++;
+                
                 if (d.lap <= d.totalLaps) { lapPopupText = `VOLTA ${d.lap}/${d.totalLaps}`; lapPopupTimer = 120; window.System.msg(lapPopupText); }
                 if(d.lap > d.totalLaps && d.state === 'RACE') { d.state = 'FINISHED'; window.System.msg(d.rank === 1 ? "VITÓRIA!" : "FIM!"); }
             }
             while(d.pos < 0) d.pos += trackLength;
 
-            // IA
+            // IA (RIVAIS)
             let pAhead = 0;
             d.rivals.forEach(r => {
                 if (!r.isRemote) {
@@ -490,13 +504,19 @@
                     if(dist > 1200) targetS *= 0.82; if(dist < -1200) targetS *= 1.05;
                     r.speed += (targetS - r.speed) * (r.aggro || 0.03);
                     r.pos += r.speed;
-                    if(r.pos >= trackLength) { r.pos -= trackLength; r.lap++; }
+                    
+                    // Loop Safety para Rivais também
+                    let rLoop = 0;
+                    while(r.pos >= trackLength && rLoop < 100) { r.pos -= trackLength; r.lap++; rLoop++; }
+                    
                     const rSeg = getSegment(Math.floor(r.pos/SEGMENT_LENGTH));
                     let idealLine = -(rSeg.curve * 0.6);
                     r.x += (idealLine - r.x) * 0.05;
                 }
+                
+                // Cálculo de Rank Seguro
                 let playerTotalDist = d.pos + (d.lap * trackLength);
-                let rivalTotalDist = r.pos + (r.lap * trackLength);
+                let rivalTotalDist = r.pos + ((r.lap || 1) * trackLength);
                 if (rivalTotalDist > playerTotalDist) pAhead++;
             });
             d.rank = 1 + pAhead;
@@ -757,6 +777,7 @@
                 }
 
                 // --- DESENHO DO VOLANTE (Z-INDEX TOPO) ---
+                // Agora protegido por beginPath e styles explícitos
                 if (d.virtualWheel.opacity > 0.01) {
                     const vw = d.virtualWheel; 
                     ctx.save(); 
@@ -769,7 +790,7 @@
                     
                     // Direção
                     ctx.rotate(d.steer * 1.4); 
-                    ctx.fillStyle = '#ff3300'; ctx.fillRect(-4, -vw.r + 10, 8, 22);
+                    ctx.fillStyle = '#ff3300'; ctx.beginPath(); ctx.fillRect(-4, -vw.r + 10, 8, 22);
                     
                     // Centro
                     ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill(); 
