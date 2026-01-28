@@ -42,7 +42,7 @@
 
     // Variáveis de Escopo Seguro
     let minimapPoints = [];
-    let particles = []; // Lixo de memória controlado agora
+    let particles = []; // Otimizado para não travar
     let nitroBtn = null;
     let lapPopupTimer = 0;
     let lapPopupText = "";
