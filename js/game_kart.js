@@ -1,5 +1,5 @@
 // =============================================================================
-// KART DO OTTO – VERSÃO FINAL (CORREÇÃO DE RENDER E MEMÓRIA)
+// KART DO OTTO – VERSÃO FINAL (NETCODE BUFFER + LOCAL WHEEL FIX)
 // =============================================================================
 
 (function() {
@@ -41,6 +41,10 @@
     let nitroBtn = null;
     let lapPopupTimer = 0;
     let lapPopupText = "";
+    
+    // --- NETWORK BUFFER (O SEGREDO DO SENIOR DEV) ---
+    // Armazena dados brutos do Firebase sem travar o loop visual
+    let netBuffer = null; 
     
     const SEGMENT_LENGTH = 200; 
     const RUMBLE_LENGTH = 3;    
@@ -89,7 +93,7 @@
         visualTilt: 0, bounce: 0, skyColor: 0, 
         inputState: 0, gestureTimer: 0,
         
-        // Volante Virtual
+        // Volante Virtual (Local)
         virtualWheel: { x:0, y:0, r:0, opacity:0 },
         rivals: [],
 
@@ -100,13 +104,14 @@
             this.setupUI();
             this.resetPhysics();
             particles = []; 
+            netBuffer = null; // Limpa buffer
             window.System.msg("SELECIONE O MODO");
         },
 
         // --- LIMPEZA DE MEMÓRIA (ANTI-TRAVAMENTO) ---
         cleanup: function() {
             if (this.dbRef) {
-                // Desliga o ouvinte anterior para não acumular
+                // Desliga o ouvinte para não acumular loops
                 this.dbRef.child('players').off(); 
             }
             if(nitroBtn) nitroBtn.remove();
@@ -204,11 +209,11 @@
             addRoad(40, 1.2, 0);
 
             trackLength = segments.length * SEGMENT_LENGTH;
-            if(trackLength === 0) trackLength = 1; // Segurança contra divisão por zero
+            if(trackLength === 0) trackLength = 1;
             buildMiniMap(segments);
         },
 
-        // --- GERENCIAMENTO DE REDE ---
+        // --- GERENCIAMENTO DE REDE (FIX: BUFFERED IO) ---
         selectMode: function(mode) {
             this.resetPhysics();
             if (mode === 'OFFLINE') {
@@ -233,7 +238,6 @@
         },
 
         connectMultiplayer: function() {
-            // FIX DE MEMÓRIA: Garante que não há ouvintes duplicados
             if (this.dbRef) this.dbRef.child('players').off(); 
 
             this.dbRef = window.DB.ref('rooms/' + this.roomId);
@@ -247,30 +251,53 @@
             });
             myRef.onDisconnect().remove();
 
+            // FIX: O Callback agora APENAS joga dados no buffer.
+            // NUNCA execute lógica de jogo pesada aqui dentro.
             this.dbRef.child('players').on('value', (snap) => {
-                const data = snap.val();
-                if (!data) return;
-                
-                const now = Date.now();
-                
-                // Mapeamento otimizado para evitar recriação excessiva de objetos
-                this.rivals = Object.keys(data)
-                    .filter(id => id !== window.System.playerId)
-                    .filter(id => (now - (data[id].lastSeen || 0)) < 15000)
-                    .map(id => {
-                        // Preserva propriedades visuais se já existirem
-                        const existing = this.rivals.find(r => r.id === id);
-                        return {
-                            id: id,
-                            ...data[id],
-                            isRemote: true,
-                            speed: existing ? existing.speed : 0, // Suavização
-                            color: CHARACTERS[data[id].charId || 0].color
-                        };
-                    });
-                
-                this.checkAutoStart(data);
+                netBuffer = snap.val(); 
             });
+        },
+
+        // --- GAME LOOP UPDATE ---
+        update: function(ctx, w, h, pose) {
+            // 1. Processa Rede (Sincronizado com o Frame, não com o Callback)
+            if (this.isOnline && netBuffer) {
+                this.processNetworkData(netBuffer);
+            }
+
+            if (this.state === 'MODE_SELECT') { this.renderModeSelect(ctx, w, h); return; }
+            if (this.state === 'LOBBY' || this.state === 'WAITING') { this.renderLobby(ctx, w, h); return; }
+
+            if (!segments || segments.length === 0) return 0;
+            
+            // 2. Física e Input (Volante Local)
+            this.updatePhysics(w, h, pose);
+            
+            // 3. Render
+            this.renderWorld(ctx, w, h);
+            this.renderUI(ctx, w, h);
+            
+            // 4. Envia Estado
+            if (this.isOnline) this.syncMultiplayer();
+            
+            return Math.floor(this.score);
+        },
+
+        // Processa o buffer de rede de forma segura
+        processNetworkData: function(data) {
+            const now = Date.now();
+            this.rivals = Object.keys(data)
+                .filter(id => id !== window.System.playerId)
+                .filter(id => (now - (data[id].lastSeen || 0)) < 15000)
+                .map(id => ({
+                    id: id,
+                    ...data[id],
+                    isRemote: true,
+                    speed: 0,
+                    color: CHARACTERS[data[id].charId || 0].color
+                }));
+            
+            this.checkAutoStart(data);
         },
 
         checkAutoStart: function(allPlayers) {
@@ -333,42 +360,20 @@
             window.System.canvas.onclick = null;
         },
 
-        // -------------------------------------------------------------
-        // UPDATE LOOP
-        // -------------------------------------------------------------
-        update: function(ctx, w, h, pose) {
-            if (this.state === 'MODE_SELECT') { this.renderModeSelect(ctx, w, h); return; }
-            if (this.state === 'LOBBY' || this.state === 'WAITING') { this.renderLobby(ctx, w, h); return; }
-
-            // Segurança: Se não há pista, não tente rodar física
-            if (!segments || segments.length === 0) return 0;
-            
-            this.updatePhysics(w, h, pose);
-            this.renderWorld(ctx, w, h);
-            this.renderUI(ctx, w, h);
-            
-            if (this.isOnline) this.syncMultiplayer();
-            
-            return Math.floor(this.score);
-        },
-
         syncMultiplayer: function() {
-            // Otimização: Só envia a cada 80ms
             if (Date.now() - this.lastSync > 80) {
                 this.lastSync = Date.now();
-                if(this.dbRef) {
-                    this.dbRef.child('players/' + window.System.playerId).update({
-                        pos: Math.floor(this.pos),
-                        x: this.playerX,
-                        lap: this.lap,
-                        lastSeen: firebase.database.ServerValue.TIMESTAMP
-                    });
-                }
+                this.dbRef.child('players/' + window.System.playerId).update({
+                    pos: Math.floor(this.pos),
+                    x: this.playerX,
+                    lap: this.lap,
+                    lastSeen: firebase.database.ServerValue.TIMESTAMP
+                });
             }
         },
 
         // -------------------------------------------------------------
-        // FÍSICA E DETECÇÃO (FIX DO VOLANTE E LOOP INFINITO)
+        // FÍSICA E DETECÇÃO (FIX DO VOLANTE E VISIBILIDADE)
         // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
@@ -377,11 +382,11 @@
             let detected = 0;
             let pLeft = null, pRight = null;
 
+            // FIX: O Volante depende EXCLUSIVAMENTE do pose local, ignorando rede.
             if (d.state === 'RACE' && pose && pose.keypoints) {
                 const lw = pose.keypoints.find(k => k.name === 'left_wrist');
                 const rw = pose.keypoints.find(k => k.name === 'right_wrist');
                 
-                // Diminuí o threshold para 0.15 para facilitar aparecer o volante
                 if (lw && lw.score > 0.15) { pLeft = window.Gfx.map(lw, w, h); detected++; }
                 if (rw && rw.score > 0.15) { pRight = window.Gfx.map(rw, w, h); detected++; }
                 
@@ -397,7 +402,7 @@
                 }
             }
 
-            // VOLANTE VIRTUAL LÓGICA - FORÇA ATUALIZAÇÃO
+            // CÁLCULO DO VOLANTE (Local Input)
             if (detected === 2) {
                 d.inputState = 2;
                 const dx = pRight.x - pLeft.x; 
@@ -411,7 +416,7 @@
                 d.virtualWheel.y = (pLeft.y + pRight.y) / 2;
                 d.virtualWheel.r = Math.max(40, Math.hypot(dx, dy) / 2);
                 
-                // FIX: FORÇA VISIBILIDADE IMEDIATA E CONSTANTE
+                // FIX: Força opacidade 1.0 sempre que detectado
                 d.virtualWheel.opacity = 1.0; 
             } else {
                 d.inputState = 0; 
@@ -422,7 +427,7 @@
             d.steer += (d.targetSteer - d.steer) * CONF.INPUT_SMOOTHING;
             d.steer = Math.max(-1.5, Math.min(1.5, d.steer));
 
-            // Carro
+            // Física do Carro
             let currentMax = CONF.MAX_SPEED * charStats.speedInfo;
             if (d.turboLock && d.nitro > 0) {
                 currentMax = CONF.TURBO_MAX_SPEED; d.nitro -= 0.6;
@@ -480,43 +485,34 @@
                 }
             });
 
-            // --- FIX DE LOOP INFINITO (CRÍTICO) ---
+            // Loop
             d.pos += d.speed;
-            
-            // Proteção contra travamento se trackLength for inválido
-            let loopGuard = 0;
-            while (d.pos >= trackLength && loopGuard < 100) {
+            while (d.pos >= trackLength) {
                 d.pos -= trackLength; d.lap++;
-                loopGuard++;
-                
                 if (d.lap <= d.totalLaps) { lapPopupText = `VOLTA ${d.lap}/${d.totalLaps}`; lapPopupTimer = 120; window.System.msg(lapPopupText); }
                 if(d.lap > d.totalLaps && d.state === 'RACE') { d.state = 'FINISHED'; window.System.msg(d.rank === 1 ? "VITÓRIA!" : "FIM!"); }
             }
             while(d.pos < 0) d.pos += trackLength;
 
-            // IA (RIVAIS)
+            // IA & Rivais (Local Simulation)
             let pAhead = 0;
             d.rivals.forEach(r => {
                 if (!r.isRemote) {
+                    // Simulação Offline
                     let dist = r.pos - d.pos;
                     if(dist > trackLength/2) dist -= trackLength; if(dist < -trackLength/2) dist += trackLength;
                     let targetS = CONF.MAX_SPEED * 0.45;
                     if(dist > 1200) targetS *= 0.82; if(dist < -1200) targetS *= 1.05;
                     r.speed += (targetS - r.speed) * (r.aggro || 0.03);
                     r.pos += r.speed;
-                    
-                    // Loop Safety para Rivais também
-                    let rLoop = 0;
-                    while(r.pos >= trackLength && rLoop < 100) { r.pos -= trackLength; r.lap++; rLoop++; }
-                    
+                    if(r.pos >= trackLength) { r.pos -= trackLength; r.lap++; }
                     const rSeg = getSegment(Math.floor(r.pos/SEGMENT_LENGTH));
                     let idealLine = -(rSeg.curve * 0.6);
                     r.x += (idealLine - r.x) * 0.05;
                 }
-                
-                // Cálculo de Rank Seguro
+                // Ranking
                 let playerTotalDist = d.pos + (d.lap * trackLength);
-                let rivalTotalDist = r.pos + ((r.lap || 1) * trackLength);
+                let rivalTotalDist = r.pos + (r.lap * trackLength);
                 if (rivalTotalDist > playerTotalDist) pAhead++;
             });
             d.rank = 1 + pAhead;
@@ -639,7 +635,6 @@
                 else { ctx.fillStyle=p.c; ctx.globalAlpha = p.l / 50; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1.0; } 
             });
             
-            // ANTI-FREEZE: Remove partículas velhas
             if(particles.length > 40) particles = particles.slice(particles.length - 40);
         },
 
@@ -776,8 +771,7 @@
                     ctx.restore();
                 }
 
-                // --- DESENHO DO VOLANTE (Z-INDEX TOPO) ---
-                // Agora protegido por beginPath e styles explícitos
+                // --- FIX: DESENHO DO VOLANTE VIRTUAL LOCAL (SEMPRE POR CIMA) ---
                 if (d.virtualWheel.opacity > 0.01) {
                     const vw = d.virtualWheel; 
                     ctx.save(); 
@@ -790,7 +784,7 @@
                     
                     // Direção
                     ctx.rotate(d.steer * 1.4); 
-                    ctx.fillStyle = '#ff3300'; ctx.beginPath(); ctx.fillRect(-4, -vw.r + 10, 8, 22);
+                    ctx.fillStyle = '#ff3300'; ctx.fillRect(-4, -vw.r + 10, 8, 22);
                     
                     // Centro
                     ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill(); 
