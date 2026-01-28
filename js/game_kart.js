@@ -1,5 +1,5 @@
 // =============================================================================
-// KART DO OTTO – VERSÃO FINAL (NETCODE BUFFER + LOCAL WHEEL FIX)
+// KART DO OTTO – VERSÃO FINAL (CORREÇÃO DE RENDER E MEMÓRIA)
 // =============================================================================
 
 (function() {
@@ -41,10 +41,6 @@
     let nitroBtn = null;
     let lapPopupTimer = 0;
     let lapPopupText = "";
-    
-    // --- NETWORK BUFFER (O SEGREDO DO SENIOR DEV) ---
-    // Armazena dados brutos do Firebase sem travar o loop visual
-    let netBuffer = null; 
     
     const SEGMENT_LENGTH = 200; 
     const RUMBLE_LENGTH = 3;    
@@ -93,7 +89,7 @@
         visualTilt: 0, bounce: 0, skyColor: 0, 
         inputState: 0, gestureTimer: 0,
         
-        // Volante Virtual (Local)
+        // Volante Virtual
         virtualWheel: { x:0, y:0, r:0, opacity:0 },
         rivals: [],
 
@@ -104,14 +100,13 @@
             this.setupUI();
             this.resetPhysics();
             particles = []; 
-            netBuffer = null; // Limpa buffer
             window.System.msg("SELECIONE O MODO");
         },
 
         // --- LIMPEZA DE MEMÓRIA (ANTI-TRAVAMENTO) ---
         cleanup: function() {
             if (this.dbRef) {
-                // Desliga o ouvinte para não acumular loops
+                // Desliga o ouvinte anterior para não acumular
                 this.dbRef.child('players').off(); 
             }
             if(nitroBtn) nitroBtn.remove();
@@ -213,7 +208,7 @@
             buildMiniMap(segments);
         },
 
-        // --- GERENCIAMENTO DE REDE (FIX: BUFFERED IO) ---
+        // --- GERENCIAMENTO DE REDE ---
         selectMode: function(mode) {
             this.resetPhysics();
             if (mode === 'OFFLINE') {
@@ -238,6 +233,7 @@
         },
 
         connectMultiplayer: function() {
+            // FIX DE MEMÓRIA: Desliga antes de ligar
             if (this.dbRef) this.dbRef.child('players').off(); 
 
             this.dbRef = window.DB.ref('rooms/' + this.roomId);
@@ -251,53 +247,24 @@
             });
             myRef.onDisconnect().remove();
 
-            // FIX: O Callback agora APENAS joga dados no buffer.
-            // NUNCA execute lógica de jogo pesada aqui dentro.
             this.dbRef.child('players').on('value', (snap) => {
-                netBuffer = snap.val(); 
+                const data = snap.val();
+                if (!data) return;
+                
+                const now = Date.now();
+                this.rivals = Object.keys(data)
+                    .filter(id => id !== window.System.playerId)
+                    .filter(id => (now - (data[id].lastSeen || 0)) < 15000)
+                    .map(id => ({
+                        id: id,
+                        ...data[id],
+                        isRemote: true,
+                        speed: 0,
+                        color: CHARACTERS[data[id].charId || 0].color
+                    }));
+                
+                this.checkAutoStart(data);
             });
-        },
-
-        // --- GAME LOOP UPDATE ---
-        update: function(ctx, w, h, pose) {
-            // 1. Processa Rede (Sincronizado com o Frame, não com o Callback)
-            if (this.isOnline && netBuffer) {
-                this.processNetworkData(netBuffer);
-            }
-
-            if (this.state === 'MODE_SELECT') { this.renderModeSelect(ctx, w, h); return; }
-            if (this.state === 'LOBBY' || this.state === 'WAITING') { this.renderLobby(ctx, w, h); return; }
-
-            if (!segments || segments.length === 0) return 0;
-            
-            // 2. Física e Input (Volante Local)
-            this.updatePhysics(w, h, pose);
-            
-            // 3. Render
-            this.renderWorld(ctx, w, h);
-            this.renderUI(ctx, w, h);
-            
-            // 4. Envia Estado
-            if (this.isOnline) this.syncMultiplayer();
-            
-            return Math.floor(this.score);
-        },
-
-        // Processa o buffer de rede de forma segura
-        processNetworkData: function(data) {
-            const now = Date.now();
-            this.rivals = Object.keys(data)
-                .filter(id => id !== window.System.playerId)
-                .filter(id => (now - (data[id].lastSeen || 0)) < 15000)
-                .map(id => ({
-                    id: id,
-                    ...data[id],
-                    isRemote: true,
-                    speed: 0,
-                    color: CHARACTERS[data[id].charId || 0].color
-                }));
-            
-            this.checkAutoStart(data);
         },
 
         checkAutoStart: function(allPlayers) {
@@ -360,7 +327,26 @@
             window.System.canvas.onclick = null;
         },
 
+        // -------------------------------------------------------------
+        // UPDATE LOOP
+        // -------------------------------------------------------------
+        update: function(ctx, w, h, pose) {
+            if (this.state === 'MODE_SELECT') { this.renderModeSelect(ctx, w, h); return; }
+            if (this.state === 'LOBBY' || this.state === 'WAITING') { this.renderLobby(ctx, w, h); return; }
+
+            if (!segments || segments.length === 0) return 0;
+            
+            this.updatePhysics(w, h, pose);
+            this.renderWorld(ctx, w, h);
+            this.renderUI(ctx, w, h);
+            
+            if (this.isOnline) this.syncMultiplayer();
+            
+            return Math.floor(this.score);
+        },
+
         syncMultiplayer: function() {
+            // Otimização: Só envia a cada 80ms
             if (Date.now() - this.lastSync > 80) {
                 this.lastSync = Date.now();
                 this.dbRef.child('players/' + window.System.playerId).update({
@@ -373,7 +359,7 @@
         },
 
         // -------------------------------------------------------------
-        // FÍSICA E DETECÇÃO (FIX DO VOLANTE E VISIBILIDADE)
+        // FÍSICA E DETECÇÃO (FIX DO VOLANTE)
         // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
@@ -382,11 +368,11 @@
             let detected = 0;
             let pLeft = null, pRight = null;
 
-            // FIX: O Volante depende EXCLUSIVAMENTE do pose local, ignorando rede.
             if (d.state === 'RACE' && pose && pose.keypoints) {
                 const lw = pose.keypoints.find(k => k.name === 'left_wrist');
                 const rw = pose.keypoints.find(k => k.name === 'right_wrist');
                 
+                // Diminuí o threshold para 0.15 para facilitar aparecer o volante
                 if (lw && lw.score > 0.15) { pLeft = window.Gfx.map(lw, w, h); detected++; }
                 if (rw && rw.score > 0.15) { pRight = window.Gfx.map(rw, w, h); detected++; }
                 
@@ -402,7 +388,7 @@
                 }
             }
 
-            // CÁLCULO DO VOLANTE (Local Input)
+            // VOLANTE VIRTUAL LÓGICA
             if (detected === 2) {
                 d.inputState = 2;
                 const dx = pRight.x - pLeft.x; 
@@ -416,7 +402,7 @@
                 d.virtualWheel.y = (pLeft.y + pRight.y) / 2;
                 d.virtualWheel.r = Math.max(40, Math.hypot(dx, dy) / 2);
                 
-                // FIX: Força opacidade 1.0 sempre que detectado
+                // FORÇA VISIBILIDADE IMEDIATA
                 d.virtualWheel.opacity = 1.0; 
             } else {
                 d.inputState = 0; 
@@ -427,7 +413,7 @@
             d.steer += (d.targetSteer - d.steer) * CONF.INPUT_SMOOTHING;
             d.steer = Math.max(-1.5, Math.min(1.5, d.steer));
 
-            // Física do Carro
+            // Carro
             let currentMax = CONF.MAX_SPEED * charStats.speedInfo;
             if (d.turboLock && d.nitro > 0) {
                 currentMax = CONF.TURBO_MAX_SPEED; d.nitro -= 0.6;
@@ -485,20 +471,21 @@
                 }
             });
 
-            // Loop
+            // Loop (COM LOOP GUARD ANTI-TRAVAMENTO)
             d.pos += d.speed;
-            while (d.pos >= trackLength) {
+            let loopGuard = 0;
+            while (d.pos >= trackLength && loopGuard < 100) {
                 d.pos -= trackLength; d.lap++;
                 if (d.lap <= d.totalLaps) { lapPopupText = `VOLTA ${d.lap}/${d.totalLaps}`; lapPopupTimer = 120; window.System.msg(lapPopupText); }
                 if(d.lap > d.totalLaps && d.state === 'RACE') { d.state = 'FINISHED'; window.System.msg(d.rank === 1 ? "VITÓRIA!" : "FIM!"); }
+                loopGuard++;
             }
             while(d.pos < 0) d.pos += trackLength;
 
-            // IA & Rivais (Local Simulation)
+            // IA
             let pAhead = 0;
             d.rivals.forEach(r => {
                 if (!r.isRemote) {
-                    // Simulação Offline
                     let dist = r.pos - d.pos;
                     if(dist > trackLength/2) dist -= trackLength; if(dist < -trackLength/2) dist += trackLength;
                     let targetS = CONF.MAX_SPEED * 0.45;
@@ -510,7 +497,6 @@
                     let idealLine = -(rSeg.curve * 0.6);
                     r.x += (idealLine - r.x) * 0.05;
                 }
-                // Ranking
                 let playerTotalDist = d.pos + (d.lap * trackLength);
                 let rivalTotalDist = r.pos + (r.lap * trackLength);
                 if (rivalTotalDist > playerTotalDist) pAhead++;
@@ -635,6 +621,7 @@
                 else { ctx.fillStyle=p.c; ctx.globalAlpha = p.l / 50; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1.0; } 
             });
             
+            // ANTI-FREEZE: Remove partículas velhas
             if(particles.length > 40) particles = particles.slice(particles.length - 40);
         },
 
@@ -771,23 +758,39 @@
                     ctx.restore();
                 }
 
-                // --- FIX: DESENHO DO VOLANTE VIRTUAL LOCAL (SEMPRE POR CIMA) ---
+                // --- DESENHO DO VOLANTE (Z-INDEX TOPO) ---
+                // Força o desenho do volante se houver detecção, independente do modo
                 if (d.virtualWheel.opacity > 0.01) {
                     const vw = d.virtualWheel; 
                     ctx.save(); 
                     ctx.globalAlpha = vw.opacity; 
                     ctx.translate(vw.x, vw.y);
                     
-                    // Aro
-                    ctx.lineWidth = 8; ctx.strokeStyle = '#222'; ctx.beginPath(); ctx.arc(0, 0, vw.r, 0, Math.PI * 2); ctx.stroke();
-                    ctx.lineWidth = 4; ctx.strokeStyle = '#00ffff'; ctx.beginPath(); ctx.arc(0, 0, vw.r - 8, 0, Math.PI * 2); ctx.stroke();
+                    // Aro - Reset de estilos para garantir visibilidade
+                    ctx.lineWidth = 8; 
+                    ctx.strokeStyle = '#222'; 
+                    ctx.beginPath(); 
+                    ctx.arc(0, 0, vw.r, 0, Math.PI * 2); 
+                    ctx.stroke();
+                    
+                    ctx.lineWidth = 4; 
+                    ctx.strokeStyle = '#00ffff'; 
+                    ctx.beginPath(); 
+                    ctx.arc(0, 0, vw.r - 8, 0, Math.PI * 2); 
+                    ctx.stroke();
                     
                     // Direção
                     ctx.rotate(d.steer * 1.4); 
-                    ctx.fillStyle = '#ff3300'; ctx.fillRect(-4, -vw.r + 10, 8, 22);
+                    ctx.fillStyle = '#ff3300'; 
+                    ctx.beginPath(); // Garante novo caminho
+                    ctx.fillRect(-4, -vw.r + 10, 8, 22);
                     
                     // Centro
-                    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill(); 
+                    ctx.fillStyle = '#111'; 
+                    ctx.beginPath(); 
+                    ctx.arc(0, 0, 10, 0, Math.PI * 2); 
+                    ctx.fill(); 
+                    
                     ctx.restore();
                 }
             } else {

@@ -1,5 +1,5 @@
 /* =================================================================
-   CORE DO SISTEMA (CÉREBRO) - VERSÃO FINAL ESTÁVEL (FIXED LOOPS)
+   CORE DO SISTEMA (CÉREBRO) - VERSÃO MULTIPLAYER ESTÁVEL
    ================================================================= */
 
 // 1. AUDIO GLOBAL
@@ -33,26 +33,26 @@ window.Gfx = {
     },
     shakeScreen: (i) => { window.Gfx.shake = i; },
     map: (pt, w, h) => ({ x: (1 - pt.x) * w, y: pt.y * h }),
-    drawSkeleton: (ctx, pose, w, h) => { /* Debug visual opcional */ }
+    drawSkeleton: (ctx, pose, w, h) => { /* Opcional: Debug visual do esqueleto */ }
 };
 
 // 3. SISTEMA PRINCIPAL
 window.System = {
     video: null, canvas: null, detector: null,
     games: [], activeGame: null, loopId: null,
-    playerId: null,
+    playerId: null, // Será definido no init
 
     init: async () => {
-        console.log("Iniciando System Wii [Core 3.0 Stable]...");
+        console.log("Iniciando System Wii...");
         
-        // Gestão de Identidade
+        // Gestão de Identidade do Jogador (Persistente)
         let savedId = localStorage.getItem('wii_player_id');
         if (!savedId) {
             savedId = 'Player_' + Math.floor(Math.random() * 9999);
             localStorage.setItem('wii_player_id', savedId);
         }
         window.System.playerId = savedId;
-        console.log("ID Local:", window.System.playerId);
+        console.log("Identidade:", window.System.playerId);
 
         // Câmera
         window.System.video = document.getElementById('webcam');
@@ -63,25 +63,22 @@ window.System = {
             window.System.video.srcObject = stream;
             await new Promise(r => window.System.video.onloadedmetadata = r);
         } catch(e) {
-            console.error("Erro Cam:", e);
-            alert("Erro: Câmera necessária para jogar.");
+            alert("Erro na Câmera! O jogo precisa de câmera para funcionar.");
         }
 
         // IA (MoveNet)
-        try {
-            const model = poseDetection.SupportedModels.MoveNet;
-            window.System.detector = await poseDetection.createDetector(model, { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING });
-        } catch(e) { console.error("Erro IA:", e); }
+        const model = poseDetection.SupportedModels.MoveNet;
+        window.System.detector = await poseDetection.createDetector(model, { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING });
 
-        // Audio Init
+        // Inicialização de Audio
         document.body.addEventListener('click', () => window.Sfx.init(), {once:true});
 
-        // Canvas
+        // Canvas e Redimensionamento
         window.System.canvas = document.getElementById('game-canvas');
         window.System.resize();
         window.addEventListener('resize', window.System.resize);
 
-        // UI Ready
+        // UI
         document.getElementById('loading').classList.add('hidden');
         window.System.menu();
     },
@@ -106,7 +103,6 @@ window.System = {
         document.getElementById('screen-over').classList.add('hidden');
         document.getElementById('webcam').style.opacity = 0;
         
-        // Limpa Canvas
         const ctx = window.System.canvas.getContext('2d');
         ctx.fillStyle = "#ececec";
         ctx.fillRect(0, 0, window.System.canvas.width, window.System.canvas.height);
@@ -116,8 +112,6 @@ window.System = {
         const game = window.System.games.find(g => g.id === id);
         if(!game) return;
 
-        window.System.stopGame(); // Garante limpeza antes de iniciar
-
         window.System.activeGame = game;
         document.getElementById('menu-screen').classList.add('hidden');
         document.getElementById('game-ui').classList.remove('hidden');
@@ -125,11 +119,17 @@ window.System = {
 
         if (game.logic.init) game.logic.init();
         window.Sfx.click();
-        window.System.loop(); // Inicia Loop Único
+        window.System.loop();
     },
 
     loop: async () => {
         if(!window.System.activeGame) return;
+
+        // Garante que não existam múltiplos loops rodando simultaneamente
+        if (window.System.loopId) {
+            cancelAnimationFrame(window.System.loopId);
+            window.System.loopId = null;
+        }
 
         const ctx = window.System.canvas.getContext('2d');
         const w = window.System.canvas.width;
@@ -140,19 +140,16 @@ window.System = {
             try {
                 const p = await window.System.detector.estimatePoses(window.System.video, {flipHorizontal: false});
                 if(p.length > 0) pose = p[0];
-            } catch(e) {}
+            } catch(e) { /* Ignora frames ruins */ }
         }
 
         ctx.save();
         window.Gfx.updateShake(ctx);
-        
-        // Core Update Call
         const s = window.System.activeGame.logic.update(ctx, w, h, pose);
         ctx.restore();
 
         if(typeof s === 'number') document.getElementById('hud-score').innerText = s;
 
-        // Loop Recursivo Seguro
         window.System.loopId = requestAnimationFrame(window.System.loop);
     },
 
