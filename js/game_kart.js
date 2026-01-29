@@ -1,5 +1,5 @@
 // =============================================================================
-// KART DO OTTO – DEFINITIVE EDITION (MULTIPLAYER + MOTION CONTROLS RESTORED)
+// KART DO OTTO – DEFINITIVE EDITION (MULTIPLAYER + MOTION CONTROLS + FIX COORDENADAS)
 // =============================================================================
 
 (function() {
@@ -31,7 +31,7 @@
         CRASH_PENALTY: 0.55,
         DEADZONE: 0.05,
         INPUT_SMOOTHING: 0.20,
-        TURBO_ZONE_Y: 0.30, // 30% superior da tela ativa o turbo
+        TURBO_ZONE_Y: 0.35, // 35% superior da tela ativa o turbo
         DRAW_DISTANCE: 60
     };
 
@@ -384,7 +384,7 @@
         },
 
         // -------------------------------------------------------------
-        // FÍSICA E INPUT (AQUI ESTÁ A MÁGICA RESTAURADA)
+        // FÍSICA E INPUT (CORREÇÃO DE RECONHECIMENTO)
         // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
@@ -395,18 +395,26 @@
             if (!Number.isFinite(d.pos)) d.pos = 0;
             if (!Number.isFinite(d.playerX)) d.playerX = 0;
             
-            // 2. DETECÇÃO DE MOVIMENTO (VOLANTE VIRTUAL)
+            // 2. DETECÇÃO DE MOVIMENTO (VOLANTE VIRTUAL BLINDADO)
             let detected = 0;
             let pLeft = null, pRight = null;
+
+            // MAPPER LOCAL ROBUSTO
+            // Converte pixels crus do MoveNet (640x480) para o canvas do jogo
+            const mapHand = (p) => ({
+                x: w - ((p.x / 640) * w), // Espelha horizontalmente e escala
+                y: (p.y / 480) * h        // Escala verticalmente
+            });
 
             if (d.state === 'RACE' && pose && pose.keypoints) {
                 // Procura os pulsos
                 const lw = pose.keypoints.find(k => k.name === 'left_wrist');
                 const rw = pose.keypoints.find(k => k.name === 'right_wrist');
                 
-                // Mapeia coordenadas para tela
-                if (lw && lw.score > 0.2) { pLeft = window.Gfx.map(lw, w, h); detected++; }
-                if (rw && rw.score > 0.2) { pRight = window.Gfx.map(rw, w, h); detected++; }
+                // Mapeia coordenadas para tela 
+                // THRESHOLD REDUZIDO para 0.1 para detectar mãos em luz baixa
+                if (lw && lw.score > 0.1) { pLeft = mapHand(lw); detected++; }
+                if (rw && rw.score > 0.1) { pRight = mapHand(rw); detected++; }
             }
 
             // LÓGICA DO VOLANTE ENTRE AS MÃOS
@@ -452,7 +460,7 @@
                 // Desaparece volante gradualmente
                 d.virtualWheel.opacity *= 0.9;
                 
-                // Se estiver muito transparente, reseta posição para baixo
+                // Se estiver muito transparente, reseta posição para baixo (Visual fantasma)
                 if(d.virtualWheel.opacity < 0.1) {
                     d.virtualWheel.x += ((w/2) - d.virtualWheel.x) * 0.1;
                     d.virtualWheel.y += ((h*0.8) - d.virtualWheel.y) * 0.1;
