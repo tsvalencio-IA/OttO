@@ -1,5 +1,5 @@
 // =============================================================================
-// KART DO OTTO – VERSÃO GOLD MASTER (TURBO GESTO + ANTI-FREEZE + SHAKE FIX)
+// KART DO OTTO – VERSÃO FUSION (ANTI-FREEZE + LOGICA ANTIGA DE INPUT)
 // =============================================================================
 
 (function() {
@@ -8,9 +8,9 @@
     // 1. DADOS E CONFIGURAÇÕES
     // -----------------------------------------------------------------
     const CHARACTERS = [
-        { id: 0, name: 'OttO', color: '#e74c3c', speedInfo: 1.0, turnInfo: 1.0, desc: 'Equilibrado' },
-        { id: 1, name: 'ThIAgo', color: '#f1c40f', speedInfo: 1.09, turnInfo: 0.85, desc: 'Velocidade Máxima' },
-        { id: 2, name: 'Thamis', color: '#3498db', speedInfo: 0.92, turnInfo: 1.15, desc: 'Controle Total' }
+        { id: 0, name: 'OTTO', color: '#e74c3c', speedInfo: 1.0, turnInfo: 1.0, desc: 'Equilibrado' },
+        { id: 1, name: 'SPEED', color: '#f1c40f', speedInfo: 1.08, turnInfo: 0.85, desc: 'Velocidade Máxima' },
+        { id: 2, name: 'TANK', color: '#3498db', speedInfo: 0.92, turnInfo: 1.15, desc: 'Controle Total' }
     ];
 
     const TRACKS = [
@@ -121,16 +121,14 @@
             Object.assign(nitroBtn.style, {
                 position: 'absolute', top: '35%', right: '20px', width: '85px', height: '85px',
                 borderRadius: '50%', background: 'radial-gradient(#ffaa00, #cc5500)', border: '4px solid #fff',
-                color: '#fff', display: 'none', alignItems: 'center', justifyContent: 'center',
+                color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontFamily: "sans-serif", fontWeight: "bold", fontSize: '16px', zIndex: '100',
-                boxShadow: '0 0 20px rgba(255, 100, 0, 0.5)', cursor: 'pointer', userSelect: 'none'
+                boxShadow: '0 0 20px rgba(255, 100, 0, 0.5)', cursor: 'pointer', transition: 'transform 0.1s, filter 0.1s',
+                userSelect: 'none', touchAction: 'manipulation'
             });
 
             const toggleTurbo = (e) => {
-                if(e) { 
-                    if(e.cancelable) e.preventDefault(); 
-                    e.stopPropagation(); 
-                }
+                if(e) { e.preventDefault(); e.stopPropagation(); }
                 if(this.state !== 'RACE') return;
                 
                 if(this.nitro > 5) {
@@ -329,7 +327,7 @@
         },
 
         // -------------------------------------------------------------
-        // FÍSICA E DETECÇÃO (LÓGICA GOLD MASTER)
+        // FÍSICA E DETECÇÃO (LÓGICA RESTAURADA DO CÓDIGO ANTIGO)
         // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
@@ -340,27 +338,28 @@
             if (!Number.isFinite(d.pos)) d.pos = 0;
             if (!Number.isFinite(d.playerX)) d.playerX = 0;
             
-            // 2. DETECÇÃO DE MOVIMENTO (USANDO GFX DO CORE COMO NO ORIGINAL)
+            // --- A. INPUT SYSTEM (EXATAMENTE COMO NO CÓDIGO ANTIGO) ---
             let detected = 0;
             let pLeft = null, pRight = null;
 
+            // Leitura de Pose (Vision)
             if (d.state === 'RACE' && pose && pose.keypoints) {
                 const lw = pose.keypoints.find(k => k.name === 'left_wrist');
                 const rw = pose.keypoints.find(k => k.name === 'right_wrist');
                 
-                // Usando window.Gfx.map para compatibilidade total com o core
+                // Score threshold igual ao código antigo (0.3)
                 if (lw && lw.score > 0.3) { pLeft = window.Gfx.map(lw, w, h); detected++; }
                 if (rw && rw.score > 0.3) { pRight = window.Gfx.map(rw, w, h); detected++; }
-                
-                // --- LÓGICA DE TURBO (GOLD MASTER) ---
+
+                // Gesto Turbo (Mãos para cima)
                 let avgY = h;
                 if (detected === 2) avgY = (pLeft.y + pRight.y) / 2;
                 else if (detected === 1) avgY = (pLeft ? pLeft.y : pRight.y);
 
                 if (avgY < h * CONF.TURBO_ZONE_Y) {
                     d.gestureTimer++;
-                    if (d.gestureTimer === 12 && d.nitro > 5) {
-                        d.turboLock = !d.turboLock;
+                    if (d.gestureTimer === 12 && d.nitro > 5) { 
+                        d.turboLock = !d.turboLock; 
                         window.System.msg(d.turboLock ? "TURBO ON" : "TURBO OFF");
                     }
                 } else {
@@ -368,28 +367,28 @@
                 }
             }
 
-            // VOLANTE VIRTUAL (LÓGICA GOLD MASTER)
+            // Cálculo do Volante (EXATAMENTE COMO NO CÓDIGO ANTIGO)
             if (detected === 2) {
                 d.inputState = 2;
-                const dx = pRight.x - pLeft.x; 
+                const dx = pRight.x - pLeft.x;
                 const dy = pRight.y - pLeft.y;
                 const rawAngle = Math.atan2(dy, dx);
-                
                 d.targetSteer = (Math.abs(rawAngle) > CONF.DEADZONE) ? rawAngle * 2.3 : 0;
                 
-                d.virtualWheel.x = (pLeft.x + pRight.x) / 2; 
+                // Feedback UI
+                d.virtualWheel.x = (pLeft.x + pRight.x) / 2;
                 d.virtualWheel.y = (pLeft.y + pRight.y) / 2;
                 d.virtualWheel.r = Math.hypot(dx, dy) / 2;
-                d.virtualWheel.opacity = 1; 
+                d.virtualWheel.opacity = 1;
             } else {
-                d.inputState = 0; 
-                d.targetSteer = 0; 
-                // Fade Out como no arquivo original
+                d.inputState = 0;
+                d.targetSteer = 0;
                 d.virtualWheel.opacity *= 0.9;
             }
             
+            // Suavização Input
             d.steer += (d.targetSteer - d.steer) * CONF.INPUT_SMOOTHING;
-            d.steer = Math.max(-1.5, Math.min(1.5, d.steer));
+            d.steer = Math.max(-1.2, Math.min(1.2, d.steer));
 
             if(nitroBtn) nitroBtn.style.opacity = (detected > 0) ? 0.3 : 1.0;
 
@@ -442,7 +441,7 @@
                 if(o.x < 10 && Math.abs(d.playerX - o.x) < 0.35 && Math.abs(d.playerX) < 4.0) {
                     d.speed *= CONF.CRASH_PENALTY; o.x = 999;
                     d.bounce = -15; window.Sfx.crash(); 
-                    window.Gfx.shakeScreen(15); // CORRIGIDO
+                    window.Gfx.shakeScreen(15); 
                 }
             });
 
@@ -478,7 +477,7 @@
             d.time++; d.score += d.speed * 0.01; d.bounce *= 0.8;
             if(Math.abs(d.playerX) > 2.2) { 
                 d.bounce = Math.sin(d.time)*5; 
-                window.Gfx.shakeScreen(2); // CORRIGIDO
+                window.Gfx.shakeScreen(2); 
             }
             d.visualTilt += (d.steer * 15 - d.visualTilt) * 0.1;
             
