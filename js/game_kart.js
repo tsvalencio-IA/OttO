@@ -1,5 +1,5 @@
 // =============================================================================
-// KART DO OTTO – VERSÃO FINAL (CORREÇÃO DE COORDENADAS + TURBO GESTO)
+// KART DO OTTO – VERSÃO GOLD MASTER (TURBO GESTO + ANTI-FREEZE + SHAKE FIX)
 // =============================================================================
 
 (function() {
@@ -329,29 +329,18 @@
         },
 
         // -------------------------------------------------------------
-        // FÍSICA E DETECÇÃO (CORREÇÃO DE MAPA E SHAKE)
+        // FÍSICA E DETECÇÃO (LÓGICA GOLD MASTER)
         // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
             const charStats = CHARACTERS[this.selectedChar];
 
-            // 1. Limpeza
+            // 1. Limpeza (Anti-Freeze)
             if (!Number.isFinite(d.speed)) d.speed = 0;
             if (!Number.isFinite(d.pos)) d.pos = 0;
             if (!Number.isFinite(d.playerX)) d.playerX = 0;
             
-            // 2. Detecção de Mão (CORREÇÃO DE COORDENADAS)
-            // A câmera do MoveNet entrega em pixels (ex: 320, 240)
-            // Precisamos converter isso para o tamanho da tela do jogo
-            const vidW = 640; // Resolução padrão do MoveNet Lightning
-            const vidH = 480;
-            
-            // Função Segura de Mapeamento (Substitui window.Gfx.map quebrada)
-            const safeMap = (pt) => ({
-                x: (1 - (pt.x / vidW)) * w, // Inverte X (espelho) e escala para largura
-                y: (pt.y / vidH) * h        // Escala Y para altura
-            });
-
+            // 2. DETECÇÃO DE MOVIMENTO (USANDO GFX DO CORE COMO NO ORIGINAL)
             let detected = 0;
             let pLeft = null, pRight = null;
 
@@ -359,44 +348,44 @@
                 const lw = pose.keypoints.find(k => k.name === 'left_wrist');
                 const rw = pose.keypoints.find(k => k.name === 'right_wrist');
                 
-                // Usa safeMap em vez de Gfx.map
-                if (lw && lw.score > 0.15) { pLeft = safeMap(lw); detected++; }
-                if (rw && rw.score > 0.15) { pRight = safeMap(rw); detected++; }
+                // Usando window.Gfx.map para compatibilidade total com o core
+                if (lw && lw.score > 0.3) { pLeft = window.Gfx.map(lw, w, h); detected++; }
+                if (rw && rw.score > 0.3) { pRight = window.Gfx.map(rw, w, h); detected++; }
                 
-                // LÓGICA DE TURBO (RESTAURADA E CORRIGIDA)
+                // --- LÓGICA DE TURBO (GOLD MASTER) ---
                 let avgY = h;
                 if (detected === 2) avgY = (pLeft.y + pRight.y) / 2;
                 else if (detected === 1) avgY = (pLeft ? pLeft.y : pRight.y);
 
-                // Agora avgY está na escala correta da tela, então a comparação funciona
-                if (detected > 0 && avgY < h * CONF.TURBO_ZONE_Y) {
+                if (avgY < h * CONF.TURBO_ZONE_Y) {
                     d.gestureTimer++;
                     if (d.gestureTimer === 12 && d.nitro > 5) {
                         d.turboLock = !d.turboLock;
-                        window.System.msg(d.turboLock ? "TURBO MAX!" : "TURBO OFF");
+                        window.System.msg(d.turboLock ? "TURBO ON" : "TURBO OFF");
                     }
                 } else {
                     d.gestureTimer = 0;
                 }
             }
 
-            // VOLANTE VIRTUAL (VISIBILIDADE)
+            // VOLANTE VIRTUAL (LÓGICA GOLD MASTER)
             if (detected === 2) {
                 d.inputState = 2;
                 const dx = pRight.x - pLeft.x; 
                 const dy = pRight.y - pLeft.y;
                 const rawAngle = Math.atan2(dy, dx);
                 
-                d.targetSteer = (Math.abs(rawAngle) > CONF.DEADZONE) ? rawAngle * 2.5 : 0;
+                d.targetSteer = (Math.abs(rawAngle) > CONF.DEADZONE) ? rawAngle * 2.3 : 0;
                 
                 d.virtualWheel.x = (pLeft.x + pRight.x) / 2; 
                 d.virtualWheel.y = (pLeft.y + pRight.y) / 2;
-                d.virtualWheel.r = Math.max(40, Math.hypot(dx, dy) / 2);
-                d.virtualWheel.opacity = 1.0; 
+                d.virtualWheel.r = Math.hypot(dx, dy) / 2;
+                d.virtualWheel.opacity = 1; 
             } else {
                 d.inputState = 0; 
                 d.targetSteer = 0; 
-                d.virtualWheel.opacity *= 0.9; // Efeito Fade Out Suave
+                // Fade Out como no arquivo original
+                d.virtualWheel.opacity *= 0.9;
             }
             
             d.steer += (d.targetSteer - d.steer) * CONF.INPUT_SMOOTHING;
@@ -448,11 +437,12 @@
                 }
             }
 
-            // Colisão (CORREÇÃO DE SHAKE)
+            // Colisão (SHAKE FIX - IMPORTANTE)
             seg.obs.forEach(o => {
                 if(o.x < 10 && Math.abs(d.playerX - o.x) < 0.35 && Math.abs(d.playerX) < 4.0) {
                     d.speed *= CONF.CRASH_PENALTY; o.x = 999;
-                    d.bounce = -15; window.Sfx.crash(); window.Gfx.shakeScreen(15); 
+                    d.bounce = -15; window.Sfx.crash(); 
+                    window.Gfx.shakeScreen(15); // CORRIGIDO
                 }
             });
 
@@ -486,7 +476,10 @@
             d.rank = 1 + pAhead;
 
             d.time++; d.score += d.speed * 0.01; d.bounce *= 0.8;
-            if(Math.abs(d.playerX) > 2.2) { d.bounce = Math.sin(d.time)*5; window.Gfx.shakeScreen(2); }
+            if(Math.abs(d.playerX) > 2.2) { 
+                d.bounce = Math.sin(d.time)*5; 
+                window.Gfx.shakeScreen(2); // CORRIGIDO
+            }
             d.visualTilt += (d.steer * 15 - d.visualTilt) * 0.1;
             
             if (d.state === 'FINISHED') {
