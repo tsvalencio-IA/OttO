@@ -1,5 +1,5 @@
 // =============================================================================
-// KART DO OTTO – VERSÃO FINAL (TURBO GESTO + VOLANTE DINÂMICO + ANTI-FREEZE)
+// KART DO OTTO – VERSÃO FINAL (CORREÇÃO DE COORDENADAS + TURBO GESTO)
 // =============================================================================
 
 (function() {
@@ -31,7 +31,7 @@
         CRASH_PENALTY: 0.55,
         DEADZONE: 0.05,
         INPUT_SMOOTHING: 0.22,
-        TURBO_ZONE_Y: 0.35, // Altura para ativar o turbo (35% do topo da tela)
+        TURBO_ZONE_Y: 0.35, 
         DRAW_DISTANCE: 60
     };
 
@@ -51,7 +51,6 @@
 
     function getSegment(index) {
         if (!segments || segments.length === 0) return DUMMY_SEG;
-        // Matematica segura para pegar segmento sem erro
         return segments[((Math.floor(index) % segments.length) + segments.length) % segments.length] || DUMMY_SEG;
     }
 
@@ -127,7 +126,6 @@
                 boxShadow: '0 0 20px rgba(255, 100, 0, 0.5)', cursor: 'pointer', userSelect: 'none'
             });
 
-            // Eventos de toque com preventDefault para evitar conflitos no mobile
             const toggleTurbo = (e) => {
                 if(e) { 
                     if(e.cancelable) e.preventDefault(); 
@@ -207,11 +205,11 @@
             addRoad(40, 1.2, 0);
 
             trackLength = segments.length * SEGMENT_LENGTH;
-            if(trackLength === 0) trackLength = 2000; // Segurança
+            if(trackLength === 0) trackLength = 2000;
             buildMiniMap(segments);
         },
 
-        // --- GERENCIAMENTO DE REDE ---
+        // --- REDE ---
         selectMode: function(mode) {
             this.resetPhysics();
             if (mode === 'OFFLINE') {
@@ -239,32 +237,18 @@
             if (this.dbRef) this.dbRef.child('players').off(); 
 
             this.dbRef = window.DB.ref('rooms/' + this.roomId);
-            
             const myRef = this.dbRef.child('players/' + window.System.playerId);
-            myRef.set({
-                name: 'Player',
-                charId: 0,
-                ready: false,
-                lastSeen: firebase.database.ServerValue.TIMESTAMP
-            });
+            myRef.set({ name: 'Player', charId: 0, ready: false, lastSeen: firebase.database.ServerValue.TIMESTAMP });
             myRef.onDisconnect().remove();
 
             this.dbRef.child('players').on('value', (snap) => {
                 const data = snap.val();
                 if (!data) return;
-                
                 const now = Date.now();
                 const newRivals = Object.keys(data)
                     .filter(id => id !== window.System.playerId)
                     .filter(id => (now - (data[id].lastSeen || 0)) < 15000)
-                    .map(id => ({
-                        id: id,
-                        ...data[id],
-                        isRemote: true,
-                        speed: 0,
-                        color: CHARACTERS[data[id].charId || 0].color
-                    }));
-                
+                    .map(id => ({ id: id, ...data[id], isRemote: true, speed: 0, color: CHARACTERS[data[id].charId || 0].color }));
                 this.rivals = newRivals;
                 this.checkAutoStart(data);
             });
@@ -272,7 +256,6 @@
 
         checkAutoStart: function(allPlayers) {
             if (this.state !== 'WAITING' && this.state !== 'LOBBY') return;
-            
             let readyCount = (this.isReady ? 1 : 0);
             this.rivals.forEach(r => { if(r.ready) readyCount++; });
             const totalPlayers = this.rivals.length + 1;
@@ -290,32 +273,18 @@
 
         toggleReady: function() {
             if (this.state !== 'LOBBY') return;
-            
-            if (!this.isOnline) {
-                this.startRace(this.selectedTrack);
-                return;
-            }
-
+            if (!this.isOnline) { this.startRace(this.selectedTrack); return; }
             this.isReady = !this.isReady;
             window.Sfx.click();
-            
-            if (this.isReady) {
-                this.state = 'WAITING';
-                window.System.msg("AGUARDANDO...");
-            } else {
-                this.state = 'LOBBY';
-                this.autoStartTimer = null;
-            }
+            if (this.isReady) { this.state = 'WAITING'; window.System.msg("AGUARDANDO..."); } 
+            else { this.state = 'LOBBY'; this.autoStartTimer = null; }
             this.syncLobby();
         },
 
         syncLobby: function() {
             if (this.dbRef) {
                 this.dbRef.child('players/' + window.System.playerId).update({
-                    charId: this.selectedChar,
-                    trackId: this.selectedTrack,
-                    ready: this.isReady,
-                    lastSeen: firebase.database.ServerValue.TIMESTAMP
+                    charId: this.selectedChar, trackId: this.selectedTrack, ready: this.isReady, lastSeen: firebase.database.ServerValue.TIMESTAMP
                 });
             }
         },
@@ -330,28 +299,20 @@
             window.System.canvas.onclick = null;
         },
 
-        // -------------------------------------------------------------
-        // UPDATE LOOP
-        // -------------------------------------------------------------
+        // --- UPDATE ---
         update: function(ctx, w, h, pose) {
-            // Bloco de segurança total para evitar Crash do Navegador
             try {
                 if (this.state === 'MODE_SELECT') { this.renderModeSelect(ctx, w, h); return; }
                 if (this.state === 'LOBBY' || this.state === 'WAITING') { this.renderLobby(ctx, w, h); return; }
-
                 if (!segments || segments.length === 0) return 0;
                 
                 this.updatePhysics(w, h, pose);
                 this.renderWorld(ctx, w, h);
                 this.renderUI(ctx, w, h);
                 
-                if (this.isOnline) {
-                    try { this.syncMultiplayer(); } catch(e) {}
-                }
-                
+                if (this.isOnline) { try { this.syncMultiplayer(); } catch(e) {} }
                 return Math.floor(this.score);
             } catch (err) {
-                // Se der erro, reseta a física mas NÃO trava o navegador
                 console.error("Erro recuperado:", err);
                 this.speed = 0;
                 return 0;
@@ -362,27 +323,35 @@
             if (Date.now() - this.lastSync > 80) {
                 this.lastSync = Date.now();
                 this.dbRef.child('players/' + window.System.playerId).update({
-                    pos: Math.floor(this.pos),
-                    x: this.playerX,
-                    lap: this.lap,
-                    lastSeen: firebase.database.ServerValue.TIMESTAMP
+                    pos: Math.floor(this.pos), x: this.playerX, lap: this.lap, lastSeen: firebase.database.ServerValue.TIMESTAMP
                 });
             }
         },
 
         // -------------------------------------------------------------
-        // FÍSICA E DETECÇÃO (TURBO RESTAURADO + CORREÇÕES)
+        // FÍSICA E DETECÇÃO (CORREÇÃO DE MAPA E SHAKE)
         // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
             const charStats = CHARACTERS[this.selectedChar];
 
-            // 1. LIMPEZA DE VALORES INVÁLIDOS (NaN Fix)
+            // 1. Limpeza
             if (!Number.isFinite(d.speed)) d.speed = 0;
             if (!Number.isFinite(d.pos)) d.pos = 0;
             if (!Number.isFinite(d.playerX)) d.playerX = 0;
             
-            // 2. DETECÇÃO DE MOVIMENTO (Pose)
+            // 2. Detecção de Mão (CORREÇÃO DE COORDENADAS)
+            // A câmera do MoveNet entrega em pixels (ex: 320, 240)
+            // Precisamos converter isso para o tamanho da tela do jogo
+            const vidW = 640; // Resolução padrão do MoveNet Lightning
+            const vidH = 480;
+            
+            // Função Segura de Mapeamento (Substitui window.Gfx.map quebrada)
+            const safeMap = (pt) => ({
+                x: (1 - (pt.x / vidW)) * w, // Inverte X (espelho) e escala para largura
+                y: (pt.y / vidH) * h        // Escala Y para altura
+            });
+
             let detected = 0;
             let pLeft = null, pRight = null;
 
@@ -390,14 +359,16 @@
                 const lw = pose.keypoints.find(k => k.name === 'left_wrist');
                 const rw = pose.keypoints.find(k => k.name === 'right_wrist');
                 
-                if (lw && lw.score > 0.15) { pLeft = window.Gfx.map(lw, w, h); detected++; }
-                if (rw && rw.score > 0.15) { pRight = window.Gfx.map(rw, w, h); detected++; }
+                // Usa safeMap em vez de Gfx.map
+                if (lw && lw.score > 0.15) { pLeft = safeMap(lw); detected++; }
+                if (rw && rw.score > 0.15) { pRight = safeMap(rw); detected++; }
                 
-                // --- LÓGICA DE TURBO POR GESTO (RESTAURADA) ---
+                // LÓGICA DE TURBO (RESTAURADA E CORRIGIDA)
                 let avgY = h;
                 if (detected === 2) avgY = (pLeft.y + pRight.y) / 2;
                 else if (detected === 1) avgY = (pLeft ? pLeft.y : pRight.y);
 
+                // Agora avgY está na escala correta da tela, então a comparação funciona
                 if (detected > 0 && avgY < h * CONF.TURBO_ZONE_Y) {
                     d.gestureTimer++;
                     if (d.gestureTimer === 12 && d.nitro > 5) {
@@ -409,7 +380,7 @@
                 }
             }
 
-            // VOLANTE VIRTUAL (VISIBILIDADE IGUAL AO ARQUIVO ANTIGO)
+            // VOLANTE VIRTUAL (VISIBILIDADE)
             if (detected === 2) {
                 d.inputState = 2;
                 const dx = pRight.x - pLeft.x; 
@@ -425,18 +396,15 @@
             } else {
                 d.inputState = 0; 
                 d.targetSteer = 0; 
-                
-                // Efeito Fade Out (Estilo Gold Master)
-                d.virtualWheel.opacity *= 0.9;
+                d.virtualWheel.opacity *= 0.9; // Efeito Fade Out Suave
             }
             
             d.steer += (d.targetSteer - d.steer) * CONF.INPUT_SMOOTHING;
             d.steer = Math.max(-1.5, Math.min(1.5, d.steer));
 
-            // Efeito visual no botão de Nitro (Para feedback de detecção)
             if(nitroBtn) nitroBtn.style.opacity = (detected > 0) ? 0.3 : 1.0;
 
-            // CÁLCULO DE VELOCIDADE
+            // Física do Carro
             let currentMax = CONF.MAX_SPEED * charStats.speedInfo;
             if (d.turboLock && d.nitro > 0) {
                 currentMax = CONF.TURBO_MAX_SPEED; d.nitro -= 0.6;
@@ -450,11 +418,8 @@
             else d.speed *= CONF.FRICTION;
 
             if (Math.abs(d.playerX) > 2.2) d.speed *= CONF.OFFROAD_DECEL;
-            
-            // Segurança extra para velocidade
             if (!Number.isFinite(d.speed)) d.speed = 0;
 
-            // FÍSICA NA PISTA
             const segIdx = Math.floor(d.pos / SEGMENT_LENGTH);
             const seg = getSegment(segIdx);
             const speedRatio = d.speed / CONF.MAX_SPEED;
@@ -469,18 +434,13 @@
             if(d.playerX < -4.5) { d.playerX = -4.5; d.speed *= 0.95; }
             if(d.playerX > 4.5)  { d.playerX = 4.5;  d.speed *= 0.95; }
 
-            // Drift Logic
             if (d.driftState === 0) {
                 if (Math.abs(d.steer) > 1.0 && speedRatio > 0.6) {
                     d.driftState = 1; d.driftDir = Math.sign(d.steer); d.driftCharge = 0; d.bounce = -8; window.Sfx.skid();
                 }
             } else {
                 if (Math.abs(d.steer) < 0.3 || speedRatio < 0.3) {
-                    if (d.mtStage > 0) { 
-                        d.boostTimer = d.mtStage * 40; 
-                        window.System.msg("BOOST!"); 
-                        window.Sfx.play(800, 'square', 0.2, 0.2); 
-                    }
+                    if (d.mtStage > 0) { d.boostTimer = d.mtStage * 40; window.System.msg("BOOST!"); window.Sfx.play(800, 'square', 0.2, 0.2); }
                     d.driftState = 0; d.mtStage = 0;
                 } else { 
                     d.driftCharge++; 
@@ -488,40 +448,23 @@
                 }
             }
 
-            // Colisão - COM CORREÇÃO DE SHAKE
+            // Colisão (CORREÇÃO DE SHAKE)
             seg.obs.forEach(o => {
                 if(o.x < 10 && Math.abs(d.playerX - o.x) < 0.35 && Math.abs(d.playerX) < 4.0) {
                     d.speed *= CONF.CRASH_PENALTY; o.x = 999;
-                    d.bounce = -15; 
-                    window.Sfx.crash(); 
-                    window.Gfx.shakeScreen(15); 
+                    d.bounce = -15; window.Sfx.crash(); window.Gfx.shakeScreen(15); 
                 }
             });
 
-            // --- CORREÇÃO FINAL DO TRAVAMENTO ---
+            // Loop Anti-Travamento
             d.pos += d.speed;
-
-            // Se a posição for maior que a pista, volta para o começo (Safe Mode)
             if (d.pos >= trackLength) {
-                d.pos -= trackLength;
-                d.lap++;
-                if (d.lap <= d.totalLaps) { 
-                    lapPopupText = `VOLTA ${d.lap}/${d.totalLaps}`; 
-                    lapPopupTimer = 120; 
-                    window.System.msg(lapPopupText); 
-                }
-                if(d.lap > d.totalLaps && d.state === 'RACE') { 
-                    d.state = 'FINISHED'; 
-                    window.System.msg(d.rank === 1 ? "VITÓRIA!" : "FIM!"); 
-                }
+                d.pos -= trackLength; d.lap++;
+                if (d.lap <= d.totalLaps) { lapPopupText = `VOLTA ${d.lap}/${d.totalLaps}`; lapPopupTimer = 120; window.System.msg(lapPopupText); }
+                if(d.lap > d.totalLaps && d.state === 'RACE') { d.state = 'FINISHED'; window.System.msg(d.rank === 1 ? "VITÓRIA!" : "FIM!"); }
             }
-            
-            // Se a posição for negativa, volta para o fim (Safe Mode)
-            if (d.pos < 0) {
-                d.pos += trackLength;
-            }
+            if (d.pos < 0) d.pos += trackLength;
 
-            // --- IA DOS RIVAIS ---
             let pAhead = 0;
             d.rivals.forEach(r => {
                 if (!r.isRemote) {
@@ -531,35 +474,24 @@
                     if(dist > 1200) targetS *= 0.82; if(dist < -1200) targetS *= 1.05;
                     r.speed += (targetS - r.speed) * (r.aggro || 0.03);
                     r.pos += r.speed;
-                    
-                    // IA Loop Logic (Safe)
                     if(r.pos >= trackLength) { r.pos -= trackLength; r.lap++; }
                     if(r.pos < 0) r.pos += trackLength;
-
                     const rSeg = getSegment(Math.floor(r.pos/SEGMENT_LENGTH));
-                    let idealLine = -(rSeg.curve * 0.6);
-                    r.x += (idealLine - r.x) * 0.05;
+                    r.x += (-(rSeg.curve * 0.6) - r.x) * 0.05;
                 }
-                let playerTotalDist = d.pos + (d.lap * trackLength);
-                let rivalTotalDist = r.pos + (r.lap * trackLength);
-                if (rivalTotalDist > playerTotalDist) pAhead++;
+                let playerTotal = d.pos + (d.lap * trackLength);
+                let rivalTotal = r.pos + (r.lap * trackLength);
+                if (rivalTotal > playerTotal) pAhead++;
             });
             d.rank = 1 + pAhead;
 
             d.time++; d.score += d.speed * 0.01; d.bounce *= 0.8;
-            
-            // CORREÇÃO DO SHAKE OFFROAD
-            if(Math.abs(d.playerX) > 2.2) { 
-                d.bounce = Math.sin(d.time)*5; 
-                window.Gfx.shakeScreen(2); 
-            }
+            if(Math.abs(d.playerX) > 2.2) { d.bounce = Math.sin(d.time)*5; window.Gfx.shakeScreen(2); }
             d.visualTilt += (d.steer * 15 - d.visualTilt) * 0.1;
             
             if (d.state === 'FINISHED') {
                 d.speed *= 0.95;
-                if(d.speed < 2 && d.finishTimer === 0) {
-                    d.finishTimer = 1; setTimeout(()=> window.System.gameOver(Math.floor(d.score)), 2000);
-                }
+                if(d.speed < 2 && d.finishTimer === 0) { d.finishTimer = 1; setTimeout(()=> window.System.gameOver(Math.floor(d.score)), 2000); }
             }
         },
 
