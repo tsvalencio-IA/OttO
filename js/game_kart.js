@@ -1,11 +1,11 @@
 // =============================================================================
-// KART DO OTTO – VERSÃO FINAL (MULTIPLAYER + CONTROLE POR GESTOS RESTAURADO)
+// KART DO OTTO – VERSÃO FINAL (FUSÃO PERFEITA: MULTIPLAYER + GESTOS ANTIGOS)
 // =============================================================================
 
 (function() {
 
     // -----------------------------------------------------------------
-    // 1. DADOS E CONFIGURAÇÕES
+    // 1. DADOS E CONFIGURAÇÕES (Idêntico ao ThIAgo.zip para manter o feeling)
     // -----------------------------------------------------------------
     const CHARACTERS = [
         { id: 0, name: 'OTTO', color: '#e74c3c', speedInfo: 1.0, turnInfo: 1.0, desc: 'Equilibrado' },
@@ -25,17 +25,17 @@
         ACCEL: 1.5,
         FRICTION: 0.985,
         OFFROAD_DECEL: 0.93,
-        CENTRIFUGAL_FORCE: 0.19,
+        CENTRIFUGAL_FORCE: 0.19, // Ajuste fino do ThIAgo.zip
         STEER_AUTHORITY: 0.18,
         GRIP_DRIFT: 0.94,
         CRASH_PENALTY: 0.55,
         DEADZONE: 0.05,
         INPUT_SMOOTHING: 0.22,
-        TURBO_ZONE_Y: 0.35, // Altura para ativar turbo (Mãos para cima)
+        TURBO_ZONE_Y: 0.35,      // Zona de ativação do turbo
         DRAW_DISTANCE: 60
     };
 
-    // Variáveis Globais do Jogo
+    // Variáveis Globais
     let minimapPoints = [];
     let particles = []; 
     let nitroBtn = null;
@@ -48,6 +48,16 @@
     let trackLength = 0;
 
     const DUMMY_SEG = { curve: 0, y: 0, color: 'light', obs: [], theme: 'grass' };
+
+    // --- FUNÇÃO DE MAPEAMENTO SEGURA (A CHAVE DO SUCESSO) ---
+    // Ignora o Gfx.map do core.js e usa a matemática do ThIAgo.zip
+    // Assume input de webcam 640x480 (padrão MoveNet)
+    function mapPosePoint(p, w, h) {
+        return {
+            x: w - (p.x / 640 * w), // Espelhamento horizontal e escala
+            y: (p.y / 480 * h)      // Escala vertical
+        };
+    }
 
     function getSegment(index) {
         if (!segments || segments.length === 0) return DUMMY_SEG;
@@ -94,8 +104,8 @@
         // INPUT HANDS (RESTAURADO)
         inputState: 0, 
         gestureTimer: 0,
-        handLeft: null, // Posição visual da mão
-        handRight: null, // Posição visual da mão
+        handLeft: null, 
+        handRight: null, 
         
         virtualWheel: { x:0, y:0, r:0, opacity:0 },
         rivals: [],
@@ -138,7 +148,6 @@
             const toggleTurbo = (e) => {
                 if(e) { if(e.cancelable) e.preventDefault(); e.stopPropagation(); }
                 if(this.state !== 'RACE') return;
-                
                 if(this.nitro > 5) {
                     this.turboLock = !this.turboLock;
                     this.updateNitroVisuals();
@@ -330,7 +339,7 @@
 
                 if (!segments || segments.length === 0) return 0;
                 
-                // >>> AQUI ESTÁ A MÁGICA RESTAURADA <<<
+                // Atualiza física com a lógica do arquivo antigo
                 this.updatePhysics(w, h, pose);
                 this.renderWorld(ctx, w, h);
                 this.renderUI(ctx, w, h);
@@ -356,7 +365,7 @@
         },
 
         // -------------------------------------------------------------
-        // FÍSICA E DETECÇÃO (RESTAURADO DO THIAGO.ZIP)
+        // FÍSICA E DETECÇÃO (LÓGICA EXATA DO THIAGO.ZIP)
         // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
@@ -367,70 +376,59 @@
             if (!Number.isFinite(d.pos)) d.pos = 0;
             if (!Number.isFinite(d.playerX)) d.playerX = 0;
             
-            // --- LÓGICA DE RECONHECIMENTO DE MÃO RESTAURADA ---
+            // --- A. INPUT SYSTEM (RESTAURADO DO THIAGO.ZIP) ---
             let detected = 0;
             let pLeft = null, pRight = null;
 
             if (d.state === 'RACE' && pose && pose.keypoints) {
-                // Busca os pontos do TensorFlow
                 const lw = pose.keypoints.find(k => k.name === 'left_wrist');
                 const rw = pose.keypoints.find(k => k.name === 'right_wrist');
                 
-                // Mapeia para coordenadas da tela se a confiança for boa
-                if (lw && lw.score > 0.3) { pLeft = window.Gfx.map(lw, w, h); detected++; }
-                if (rw && rw.score > 0.3) { pRight = window.Gfx.map(rw, w, h); detected++; }
+                // IMPORTANTE: Usa mapPosePoint local para garantir coordenadas corretas
+                if (lw && lw.score > 0.3) { pLeft = mapPosePoint(lw, w, h); detected++; }
+                if (rw && rw.score > 0.3) { pRight = mapPosePoint(rw, w, h); detected++; }
 
-                // Salva para renderizar depois
                 d.handLeft = pLeft;
                 d.handRight = pRight;
 
-                // LOGICA TURBO: MÉDIA DA ALTURA DAS MÃOS
-                if (detected >= 1) {
-                    let avgY = (detected === 2) ? (pLeft.y + pRight.y) / 2 : (pLeft ? pLeft.y : pRight.y);
-                    
-                    // Se as mãos estiverem na parte superior (zona de turbo)
-                    if (avgY < h * CONF.TURBO_ZONE_Y) {
-                        d.gestureTimer++;
-                        // Debounce de 12 frames para evitar ativação acidental
-                        if (d.gestureTimer === 12 && d.nitro > 5) {
-                            d.turboLock = !d.turboLock; 
-                            this.updateNitroVisuals();
-                            window.System.msg(d.turboLock ? "TURBO LIGADO!" : "TURBO DESLIGADO");
-                        }
-                    } else { 
-                        d.gestureTimer = 0; 
+                // Gesto Turbo (Mãos para cima)
+                let avgY = h;
+                if (detected === 2) avgY = (pLeft.y + pRight.y) / 2;
+                else if (detected === 1) avgY = (pLeft ? pLeft.y : pRight.y);
+
+                if (avgY < h * CONF.TURBO_ZONE_Y) {
+                    d.gestureTimer++;
+                    if (d.gestureTimer === 12 && d.nitro > 5) { 
+                        d.turboLock = !d.turboLock; 
+                        this.updateNitroVisuals();
+                        window.System.msg(d.turboLock ? "TURBO LIGADO!" : "TURBO DESLIGADO");
                     }
-                    
-                    // Esconde botão se estiver usando gestos
-                    if(nitroBtn) nitroBtn.style.opacity = '0.3';
                 } else {
-                    if(nitroBtn) nitroBtn.style.opacity = '1.0';
+                    d.gestureTimer = 0;
                 }
+                
+                // Esconde botão se estiver usando gestos
+                if(nitroBtn) nitroBtn.style.opacity = (detected > 0) ? '0.3' : '1.0';
             }
 
-            // LÓGICA DE DIREÇÃO: ÂNGULO ENTRE OS PULSOS
+            // Cálculo do Volante
             if (detected === 2) {
                 d.inputState = 2;
                 const dx = pRight.x - pLeft.x;
                 const dy = pRight.y - pLeft.y;
-                
-                // Calcula o ângulo real (como segurar um volante)
                 const rawAngle = Math.atan2(dy, dx);
-                
-                // Aplica zona morta e multiplicador
                 d.targetSteer = (Math.abs(rawAngle) > CONF.DEADZONE) ? rawAngle * 2.3 : 0;
                 
-                // Posiciona o volante virtual EXATAMENTE entre as mãos
+                // Feedback UI
                 d.virtualWheel.x = (pLeft.x + pRight.x) / 2;
                 d.virtualWheel.y = (pLeft.y + pRight.y) / 2;
-                d.virtualWheel.r = Math.hypot(dx, dy) / 2; // O tamanho ajusta com a distância das mãos
-                d.virtualWheel.opacity = 1.0; 
+                d.virtualWheel.r = Math.hypot(dx, dy) / 2;
+                d.virtualWheel.opacity = 1;
             } else {
-                // MODO FANTASMA (Sem mãos detectadas)
                 d.inputState = 0;
                 d.targetSteer = 0;
                 
-                // Centraliza volante suavemente
+                // Centraliza volante suavemente (Modo Fantasma)
                 if (d.virtualWheel.x === 0) { d.virtualWheel.x = w/2; d.virtualWheel.y = h*0.75; }
                 d.virtualWheel.x += ((w / 2) - d.virtualWheel.x) * 0.1;
                 d.virtualWheel.y += ((h * 0.75) - d.virtualWheel.y) * 0.1;
@@ -438,11 +436,11 @@
                 d.virtualWheel.opacity += (0.3 - d.virtualWheel.opacity) * 0.1;
             }
             
-            // Suavização do input para não ficar tremido
+            // Suavização do input
             d.steer += (d.targetSteer - d.steer) * CONF.INPUT_SMOOTHING;
             d.steer = Math.max(-1.5, Math.min(1.5, d.steer));
 
-            // --- FÍSICA DO CARRO ---
+            // --- B. FÍSICA DO CARRO ---
             let currentMax = CONF.MAX_SPEED * charStats.speedInfo;
             
             // Consumo de Turbo
@@ -803,7 +801,7 @@
                     ctx.restore();
                 }
 
-                // VOLANTE & MÃOS VISUAIS
+                // VOLANTE & MÃOS VISUAIS (Feedback Visual Claro)
                 if (d.virtualWheel.opacity > 0.01) {
                     const vw = d.virtualWheel; 
                     
