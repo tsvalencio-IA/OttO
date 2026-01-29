@@ -8,9 +8,9 @@
     // 1. DADOS E CONFIGURAÇÕES
     // -----------------------------------------------------------------
     const CHARACTERS = [
-        { id: 0, name: 'OTTO', color: '#e74c3c', speedInfo: 1.0, turnInfo: 1.0, desc: 'Equilibrado' },
-        { id: 1, name: 'SPEED', color: '#f1c40f', speedInfo: 1.08, turnInfo: 0.85, desc: 'Velocidade Máxima' },
-        { id: 2, name: 'TANK', color: '#3498db', speedInfo: 0.92, turnInfo: 1.15, desc: 'Controle Total' }
+        { id: 0, name: 'OttO', color: '#e74c3c', speedInfo: 1.0, turnInfo: 1.0, desc: 'Equilibrado' },
+        { id: 1, name: 'ThIAgo', color: '#f1c40f', speedInfo: 1.09, turnInfo: 0.85, desc: 'Velocidade Máxima' },
+        { id: 2, name: 'Thamis', color: '#3498db', speedInfo: 0.92, turnInfo: 1.15, desc: 'Controle Total' }
     ];
 
     const TRACKS = [
