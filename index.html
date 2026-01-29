@@ -6,6 +6,7 @@
     <title>ThIAguinho Wii: Console OS</title>
     
     <!-- Bibliotecas Essenciais -->
+    <!-- TensorFlow.js (IA de Movimento) -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
@@ -129,11 +130,11 @@
     <!-- LOADING SCREEN -->
     <div id="loading">
         <div style="width: 50px; height: 50px; border: 5px solid #3498db; border-top-color: transparent; border-radius: 50%; animation: spin 1s infinite;"></div>
-        <p style="margin-top: 20px; letter-spacing: 2px;">INICIANDO SISTEMA...</p>
+        <p style="margin-top: 20px; letter-spacing: 2px;" id="loading-text">INICIANDO SISTEMA...</p>
     </div>
 
     <!-- WII MENU (INTERFACE) -->
-    <div id="menu-screen" class="wii-container">
+    <div id="menu-screen" class="wii-container hidden">
         <!-- Cabeçalho com Data -->
         <div class="wii-header">
             <span style="font-weight: bold;">thIAguinho Wii</span>
@@ -148,7 +149,7 @@
         <!-- Rodapé -->
         <div class="wii-footer">
             <div class="wii-btn" onclick="alert('Conectado como: ' + window.System.playerId)">Wii Menu</div>
-            <div class="wii-btn" onclick="window.location.reload()">Start</div>
+            <div class="wii-btn" onclick="window.location.reload()">Reset</div>
         </div>
         
         <!-- Status de Conexão -->
@@ -189,11 +190,15 @@
 
         // Inicializa o Firebase
         try {
-            firebase.initializeApp(firebaseConfig);
-            window.DB = firebase.database();
-            console.log("🔥 Firebase: CONECTADO!");
-            document.getElementById('net-status').innerHTML = "ONLINE 🟢";
-            document.getElementById('net-status').style.color = "green";
+            if (typeof firebase !== 'undefined') {
+                firebase.initializeApp(firebaseConfig);
+                window.DB = firebase.database();
+                console.log("🔥 Firebase: CONECTADO!");
+                document.getElementById('net-status').innerHTML = "ONLINE 🟢";
+                document.getElementById('net-status').style.color = "green";
+            } else {
+                console.warn("Firebase SDK não carregou.");
+            }
         } catch (e) {
             console.error("Erro Firebase:", e);
         }
@@ -201,16 +206,16 @@
 
     <!-- SCRIPTS DO SISTEMA -->
     <script src="js/core.js"></script>
-    <script src="js/game_box.js"></script>
-    <script src="js/game_run.js"></script>
-    <script src="js/game_tennis.js"></script>
+    <!-- Inclua seus outros scripts aqui (game_box.js, etc.) se tiver, senão o código vai ignorar -->
+    <!-- <script src="js/game_box.js"></script> -->
     <script src="js/game_kart.js"></script>
 
     <script>
         // Relógio do Wii
         setInterval(() => {
             const now = new Date();
-            document.getElementById('clock').innerText = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            const el = document.getElementById('clock');
+            if(el) el.innerText = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
         }, 1000);
     </script>
 </body>
