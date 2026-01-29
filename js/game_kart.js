@@ -1,5 +1,5 @@
 // =============================================================================
-// KART DO OTTO – VERSÃO FUSION (ANTI-FREEZE + LOGICA ANTIGA DE INPUT)
+// KART DO OTTO – VERSÃO HYBRID FUSION (ANTI-FREEZE + INPUT CLÁSSICO)
 // =============================================================================
 
 (function() {
@@ -327,7 +327,7 @@
         },
 
         // -------------------------------------------------------------
-        // FÍSICA E DETECÇÃO (LÓGICA RESTAURADA DO CÓDIGO ANTIGO)
+        // FÍSICA E DETECÇÃO (LÓGICA RESTAURADA FIELMENTE)
         // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
@@ -338,16 +338,18 @@
             if (!Number.isFinite(d.pos)) d.pos = 0;
             if (!Number.isFinite(d.playerX)) d.playerX = 0;
             
-            // --- A. INPUT SYSTEM (EXATAMENTE COMO NO CÓDIGO ANTIGO) ---
+            // --- A. INPUT SYSTEM (CÓDIGO ORIGINAL INJETADO) ---
             let detected = 0;
             let pLeft = null, pRight = null;
 
             // Leitura de Pose (Vision)
+            // No seu código antigo a verificação era: if (d.state === 'race' ... )
+            // Aqui usamos 'RACE' pois o sistema novo usa maiúsculo.
             if (d.state === 'RACE' && pose && pose.keypoints) {
                 const lw = pose.keypoints.find(k => k.name === 'left_wrist');
                 const rw = pose.keypoints.find(k => k.name === 'right_wrist');
                 
-                // Score threshold igual ao código antigo (0.3)
+                // Score threshold e uso de Gfx.map igual ao antigo
                 if (lw && lw.score > 0.3) { pLeft = window.Gfx.map(lw, w, h); detected++; }
                 if (rw && rw.score > 0.3) { pRight = window.Gfx.map(rw, w, h); detected++; }
 
@@ -367,7 +369,7 @@
                 }
             }
 
-            // Cálculo do Volante (EXATAMENTE COMO NO CÓDIGO ANTIGO)
+            // Cálculo do Volante (CÓDIGO ORIGINAL INJETADO)
             if (detected === 2) {
                 d.inputState = 2;
                 const dx = pRight.x - pLeft.x;
@@ -375,7 +377,7 @@
                 const rawAngle = Math.atan2(dy, dx);
                 d.targetSteer = (Math.abs(rawAngle) > CONF.DEADZONE) ? rawAngle * 2.3 : 0;
                 
-                // Feedback UI
+                // Feedback UI - Posição baseada nas mãos
                 d.virtualWheel.x = (pLeft.x + pRight.x) / 2;
                 d.virtualWheel.y = (pLeft.y + pRight.y) / 2;
                 d.virtualWheel.r = Math.hypot(dx, dy) / 2;
@@ -383,7 +385,7 @@
             } else {
                 d.inputState = 0;
                 d.targetSteer = 0;
-                d.virtualWheel.opacity *= 0.9;
+                d.virtualWheel.opacity *= 0.9; // Fade out suave quando não detectado
             }
             
             // Suavização Input
