@@ -1,5 +1,5 @@
 // =============================================================================
-// KART DO OTTO – VERSÃO FINAL (CORREÇÃO DE RENDER, MEMÓRIA E ANTI-FREEZE)
+// KART DO OTTO – VERSÃO BLINDADA (SEM LOOP INFINITO)
 // =============================================================================
 
 (function() {
@@ -35,7 +35,7 @@
         DRAW_DISTANCE: 60
     };
 
-    // Variáveis Seguras
+    // Variáveis Globais do Jogo
     let minimapPoints = [];
     let particles = []; 
     let nitroBtn = null;
@@ -51,6 +51,7 @@
 
     function getSegment(index) {
         if (!segments || segments.length === 0) return DUMMY_SEG;
+        // Matematica segura para pegar segmento sem erro
         return segments[((Math.floor(index) % segments.length) + segments.length) % segments.length] || DUMMY_SEG;
     }
 
@@ -89,7 +90,6 @@
         visualTilt: 0, bounce: 0, skyColor: 0, 
         inputState: 0, gestureTimer: 0,
         
-        // Volante Virtual
         virtualWheel: { x:0, y:0, r:0, opacity:0 },
         rivals: [],
 
@@ -103,11 +103,10 @@
             window.System.msg("SELECIONE O MODO");
         },
 
-        // --- LIMPEZA DE MEMÓRIA (ANTI-TRAVAMENTO) ---
+        // --- LIMPEZA ---
         cleanup: function() {
             if (this.dbRef) {
-                // Desliga o ouvinte anterior para não acumular
-                this.dbRef.child('players').off(); 
+                try { this.dbRef.child('players').off(); } catch(e){}
             }
             if(nitroBtn) nitroBtn.remove();
             window.System.canvas.onclick = null;
@@ -128,8 +127,12 @@
                 boxShadow: '0 0 20px rgba(255, 100, 0, 0.5)', cursor: 'pointer', userSelect: 'none'
             });
 
+            // Eventos de toque com preventDefault para evitar conflitos no mobile
             const toggleTurbo = (e) => {
-                if(e) { e.preventDefault(); e.stopPropagation(); }
+                if(e) { 
+                    if(e.cancelable) e.preventDefault(); 
+                    e.stopPropagation(); 
+                }
                 if(this.state !== 'RACE') return;
                 
                 if(this.nitro > 5) {
@@ -204,7 +207,7 @@
             addRoad(40, 1.2, 0);
 
             trackLength = segments.length * SEGMENT_LENGTH;
-            if(trackLength === 0) trackLength = 1;
+            if(trackLength === 0) trackLength = 2000; // Segurança
             buildMiniMap(segments);
         },
 
@@ -233,7 +236,6 @@
         },
 
         connectMultiplayer: function() {
-            // FIX DE MEMÓRIA: Desliga antes de ligar
             if (this.dbRef) this.dbRef.child('players').off(); 
 
             this.dbRef = window.DB.ref('rooms/' + this.roomId);
@@ -251,7 +253,6 @@
                 const data = snap.val();
                 if (!data) return;
                 
-                // Snapshot imutável para evitar conflitos com o loop de render
                 const now = Date.now();
                 const newRivals = Object.keys(data)
                     .filter(id => id !== window.System.playerId)
@@ -264,7 +265,6 @@
                         color: CHARACTERS[data[id].charId || 0].color
                     }));
                 
-                // Atualiza rivais de forma atômica
                 this.rivals = newRivals;
                 this.checkAutoStart(data);
             });
@@ -331,36 +331,34 @@
         },
 
         // -------------------------------------------------------------
-        // UPDATE LOOP (MODIFICADO COM TRY/CATCH PARA NÃO QUEBRAR O CORE)
+        // UPDATE LOOP
         // -------------------------------------------------------------
         update: function(ctx, w, h, pose) {
+            // Bloco de segurança total para evitar Crash do Navegador
             try {
                 if (this.state === 'MODE_SELECT') { this.renderModeSelect(ctx, w, h); return; }
                 if (this.state === 'LOBBY' || this.state === 'WAITING') { this.renderLobby(ctx, w, h); return; }
 
                 if (!segments || segments.length === 0) return 0;
                 
-                // Ordem de execução crítica para evitar travamentos e garantir visibilidade
                 this.updatePhysics(w, h, pose);
                 this.renderWorld(ctx, w, h);
                 this.renderUI(ctx, w, h);
                 
-                // Sincronização de rede isolada do loop de renderização principal
                 if (this.isOnline) {
-                    try {
-                        this.syncMultiplayer();
-                    } catch(e) { console.warn("Erro na sincronização de rede:", e); }
+                    try { this.syncMultiplayer(); } catch(e) {}
                 }
                 
                 return Math.floor(this.score);
             } catch (err) {
-                console.error("ERRO CRÍTICO NO GAME LOOP:", err);
-                return 0; // Retorna 0 para não quebrar o requestAnimationFrame do core.js
+                // Se der erro, reseta a física mas NÃO trava o navegador
+                console.error("Erro recuperado:", err);
+                this.speed = 0;
+                return 0;
             }
         },
 
         syncMultiplayer: function() {
-            // Otimização: Só envia a cada 80ms
             if (Date.now() - this.lastSync > 80) {
                 this.lastSync = Date.now();
                 this.dbRef.child('players/' + window.System.playerId).update({
@@ -373,17 +371,18 @@
         },
 
         // -------------------------------------------------------------
-        // FÍSICA E DETECÇÃO (COM FIX DE TRAVAMENTO)
+        // FÍSICA E DETECÇÃO (BLINDADA)
         // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
             const charStats = CHARACTERS[this.selectedChar];
 
-            // 1. PROTEÇÃO CONTRA VALORES CORROMPIDOS (NaN)
-            if (isNaN(d.pos)) d.pos = 0;
-            if (isNaN(d.speed)) d.speed = 0;
-            if (isNaN(d.playerX)) d.playerX = 0;
+            // 1. LIMPEZA DE VALORES INVÁLIDOS (NaN Fix)
+            if (!Number.isFinite(d.speed)) d.speed = 0;
+            if (!Number.isFinite(d.pos)) d.pos = 0;
+            if (!Number.isFinite(d.playerX)) d.playerX = 0;
             
+            // 2. DETECÇÃO DE MOVIMENTO (Pose)
             let detected = 0;
             let pLeft = null, pRight = null;
 
@@ -391,7 +390,6 @@
                 const lw = pose.keypoints.find(k => k.name === 'left_wrist');
                 const rw = pose.keypoints.find(k => k.name === 'right_wrist');
                 
-                // Diminuí o threshold para 0.15 para facilitar aparecer o volante
                 if (lw && lw.score > 0.15) { pLeft = window.Gfx.map(lw, w, h); detected++; }
                 if (rw && rw.score > 0.15) { pRight = window.Gfx.map(rw, w, h); detected++; }
                 
@@ -407,7 +405,7 @@
                 }
             }
 
-            // VOLANTE VIRTUAL LÓGICA
+            // VOLANTE VIRTUAL
             if (detected === 2) {
                 d.inputState = 2;
                 const dx = pRight.x - pLeft.x; 
@@ -416,12 +414,9 @@
                 
                 d.targetSteer = (Math.abs(rawAngle) > CONF.DEADZONE) ? rawAngle * 2.5 : 0;
                 
-                // Define posição
                 d.virtualWheel.x = (pLeft.x + pRight.x) / 2; 
                 d.virtualWheel.y = (pLeft.y + pRight.y) / 2;
                 d.virtualWheel.r = Math.max(40, Math.hypot(dx, dy) / 2);
-                
-                // FORÇA VISIBILIDADE IMEDIATA
                 d.virtualWheel.opacity = 1.0; 
             } else {
                 d.inputState = 0; 
@@ -432,7 +427,7 @@
             d.steer += (d.targetSteer - d.steer) * CONF.INPUT_SMOOTHING;
             d.steer = Math.max(-1.5, Math.min(1.5, d.steer));
 
-            // Carro
+            // CÁLCULO DE VELOCIDADE
             let currentMax = CONF.MAX_SPEED * charStats.speedInfo;
             if (d.turboLock && d.nitro > 0) {
                 currentMax = CONF.TURBO_MAX_SPEED; d.nitro -= 0.6;
@@ -447,10 +442,10 @@
 
             if (Math.abs(d.playerX) > 2.2) d.speed *= CONF.OFFROAD_DECEL;
             
-            // Re-cheque de NaN após cálculos de física
-            if (isNaN(d.speed)) d.speed = 0;
-            if (isNaN(d.playerX)) d.playerX = 0;
+            // Segurança extra para velocidade
+            if (!Number.isFinite(d.speed)) d.speed = 0;
 
+            // FÍSICA NA PISTA
             const segIdx = Math.floor(d.pos / SEGMENT_LENGTH);
             const seg = getSegment(segIdx);
             const speedRatio = d.speed / CONF.MAX_SPEED;
@@ -465,7 +460,7 @@
             if(d.playerX < -4.5) { d.playerX = -4.5; d.speed *= 0.95; }
             if(d.playerX > 4.5)  { d.playerX = 4.5;  d.speed *= 0.95; }
 
-            // Drift
+            // Drift Logic
             if (d.driftState === 0) {
                 if (Math.abs(d.steer) > 1.0 && speedRatio > 0.6) {
                     d.driftState = 1; d.driftDir = Math.sign(d.steer); d.driftCharge = 0; d.bounce = -8; window.Sfx.skid();
@@ -492,30 +487,33 @@
                 }
             });
 
-            // Loop (COM LOOP GUARD DUPLO - ANTI-TRAVAMENTO REFORÇADO)
-            // Isso previne que o navegador trave se a posição ficar inválida
-            d.pos += d.speed;
+            // --- CORREÇÃO FINAL DO TRAVAMENTO ---
+            // Substituímos o LOOP WHILE por IF para garantir que NUNCA trave
             
-            // Guarda para frente (Já existia, mantido)
-            let loopGuard = 0;
-            while (d.pos >= trackLength && loopGuard < 100) {
-                d.pos -= trackLength; d.lap++;
-                if (d.lap <= d.totalLaps) { lapPopupText = `VOLTA ${d.lap}/${d.totalLaps}`; lapPopupTimer = 120; window.System.msg(lapPopupText); }
-                if(d.lap > d.totalLaps && d.state === 'RACE') { d.state = 'FINISHED'; window.System.msg(d.rank === 1 ? "VITÓRIA!" : "FIM!"); }
-                loopGuard++;
-            }
+            d.pos += d.speed;
 
-            // ---[A CORREÇÃO PRINCIPAL]---
-            // Guarda para trás (Onde o jogo estava travando nos vídeos)
-            let loopGuardNeg = 0;
-            while(d.pos < 0 && loopGuardNeg < 100) { 
+            // Se a posição for maior que a pista, volta para o começo (Safe Mode)
+            if (d.pos >= trackLength) {
+                d.pos -= trackLength;
+                d.lap++;
+                if (d.lap <= d.totalLaps) { 
+                    lapPopupText = `VOLTA ${d.lap}/${d.totalLaps}`; 
+                    lapPopupTimer = 120; 
+                    window.System.msg(lapPopupText); 
+                }
+                if(d.lap > d.totalLaps && d.state === 'RACE') { 
+                    d.state = 'FINISHED'; 
+                    window.System.msg(d.rank === 1 ? "VITÓRIA!" : "FIM!"); 
+                }
+            }
+            
+            // Se a posição for negativa, volta para o fim (Safe Mode)
+            // Isso evita o loop infinito reverso que estava travando seu jogo
+            if (d.pos < 0) {
                 d.pos += trackLength;
-                loopGuardNeg++;
             }
-            // Se passar de 100 loops e ainda for negativo, forçamos 0 para evitar travamento
-            if (loopGuardNeg >= 100) d.pos = 0;
 
-            // IA
+            // --- IA DOS RIVAIS ---
             let pAhead = 0;
             d.rivals.forEach(r => {
                 if (!r.isRemote) {
@@ -525,7 +523,11 @@
                     if(dist > 1200) targetS *= 0.82; if(dist < -1200) targetS *= 1.05;
                     r.speed += (targetS - r.speed) * (r.aggro || 0.03);
                     r.pos += r.speed;
+                    
+                    // IA Loop Logic (Safe)
                     if(r.pos >= trackLength) { r.pos -= trackLength; r.lap++; }
+                    if(r.pos < 0) r.pos += trackLength;
+
                     const rSeg = getSegment(Math.floor(r.pos/SEGMENT_LENGTH));
                     let idealLine = -(rSeg.curve * 0.6);
                     r.x += (idealLine - r.x) * 0.05;
@@ -548,9 +550,6 @@
             }
         },
 
-        // -------------------------------------------------------------
-        // RENDER MUNDO
-        // -------------------------------------------------------------
         renderWorld: function(ctx, w, h) {
             const d = Logic; const cx = w / 2; const horizon = h * 0.40;
             const currentSegIndex = Math.floor(d.pos / SEGMENT_LENGTH);
@@ -616,9 +615,7 @@
 
             for(let n = 79; n >= 0; n--) {
                 const coord = segmentCoords[n]; 
-                // Proteção contra undefined (Render Fix)
                 if (!coord) continue;
-                
                 const seg = getSegment(coord.index);
                 d.rivals.forEach(r => {
                     let rRelPos = r.pos - d.pos; if(rRelPos < -trackLength/2) rRelPos += trackLength; if(rRelPos > trackLength/2) rRelPos -= trackLength;
@@ -658,7 +655,6 @@
                 else { ctx.fillStyle=p.c; ctx.globalAlpha = p.l / 50; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1.0; } 
             });
             
-            // ANTI-FREEZE: Remove partículas velhas
             if(particles.length > 40) particles = particles.slice(particles.length - 40);
         },
 
@@ -795,39 +791,18 @@
                     ctx.restore();
                 }
 
-                // --- DESENHO DO VOLANTE (Z-INDEX TOPO) ---
-                // Força o desenho do volante se houver detecção, independente do modo
+                // VOLANTE
                 if (d.virtualWheel.opacity > 0.01) {
                     const vw = d.virtualWheel; 
                     ctx.save(); 
                     ctx.globalAlpha = vw.opacity; 
                     ctx.translate(vw.x, vw.y);
                     
-                    // Aro - Reset de estilos para garantir visibilidade
-                    ctx.lineWidth = 8; 
-                    ctx.strokeStyle = '#222'; 
-                    ctx.beginPath(); 
-                    ctx.arc(0, 0, vw.r, 0, Math.PI * 2); 
-                    ctx.stroke();
-                    
-                    ctx.lineWidth = 4; 
-                    ctx.strokeStyle = '#00ffff'; 
-                    ctx.beginPath(); 
-                    ctx.arc(0, 0, vw.r - 8, 0, Math.PI * 2); 
-                    ctx.stroke();
-                    
-                    // Direção
+                    ctx.lineWidth = 8; ctx.strokeStyle = '#222'; ctx.beginPath(); ctx.arc(0, 0, vw.r, 0, Math.PI * 2); ctx.stroke();
+                    ctx.lineWidth = 4; ctx.strokeStyle = '#00ffff'; ctx.beginPath(); ctx.arc(0, 0, vw.r - 8, 0, Math.PI * 2); ctx.stroke();
                     ctx.rotate(d.steer * 1.4); 
-                    ctx.fillStyle = '#ff3300'; 
-                    ctx.beginPath(); // Garante novo caminho
-                    ctx.fillRect(-4, -vw.r + 10, 8, 22);
-                    
-                    // Centro
-                    ctx.fillStyle = '#111'; 
-                    ctx.beginPath(); 
-                    ctx.arc(0, 0, 10, 0, Math.PI * 2); 
-                    ctx.fill(); 
-                    
+                    ctx.fillStyle = '#ff3300'; ctx.beginPath(); ctx.fillRect(-4, -vw.r + 10, 8, 22);
+                    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill(); 
                     ctx.restore();
                 }
             } else {
