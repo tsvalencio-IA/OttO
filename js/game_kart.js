@@ -1,5 +1,5 @@
 // =============================================================================
-// KART DO OTTO – VERSÃO FINAL (CORREÇÃO DE GFX SHAKE)
+// KART DO OTTO – VERSÃO FINAL (TURBO GESTO + VOLANTE DINÂMICO + ANTI-FREEZE)
 // =============================================================================
 
 (function() {
@@ -31,7 +31,7 @@
         CRASH_PENALTY: 0.55,
         DEADZONE: 0.05,
         INPUT_SMOOTHING: 0.22,
-        TURBO_ZONE_Y: 0.35, 
+        TURBO_ZONE_Y: 0.35, // Altura para ativar o turbo (35% do topo da tela)
         DRAW_DISTANCE: 60
     };
 
@@ -371,7 +371,7 @@
         },
 
         // -------------------------------------------------------------
-        // FÍSICA E DETECÇÃO (BLINDADA)
+        // FÍSICA E DETECÇÃO (TURBO RESTAURADO + CORREÇÕES)
         // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
@@ -393,19 +393,23 @@
                 if (lw && lw.score > 0.15) { pLeft = window.Gfx.map(lw, w, h); detected++; }
                 if (rw && rw.score > 0.15) { pRight = window.Gfx.map(rw, w, h); detected++; }
                 
-                if (detected >= 1) {
-                    let avgY = (detected === 2) ? (pLeft.y + pRight.y) / 2 : (pLeft ? pLeft.y : pRight.y);
-                    if (avgY < h * CONF.TURBO_ZONE_Y) {
-                        d.gestureTimer++;
-                        if (d.gestureTimer === 15 && d.nitro > 5) {
-                            d.turboLock = !d.turboLock; 
-                            window.System.msg(d.turboLock ? "TURBO MAX!" : "TURBO OFF");
-                        }
-                    } else { d.gestureTimer = 0; }
+                // --- LÓGICA DE TURBO POR GESTO (RESTAURADA) ---
+                let avgY = h;
+                if (detected === 2) avgY = (pLeft.y + pRight.y) / 2;
+                else if (detected === 1) avgY = (pLeft ? pLeft.y : pRight.y);
+
+                if (detected > 0 && avgY < h * CONF.TURBO_ZONE_Y) {
+                    d.gestureTimer++;
+                    if (d.gestureTimer === 12 && d.nitro > 5) {
+                        d.turboLock = !d.turboLock;
+                        window.System.msg(d.turboLock ? "TURBO MAX!" : "TURBO OFF");
+                    }
+                } else {
+                    d.gestureTimer = 0;
                 }
             }
 
-            // VOLANTE VIRTUAL
+            // VOLANTE VIRTUAL (VISIBILIDADE IGUAL AO ARQUIVO ANTIGO)
             if (detected === 2) {
                 d.inputState = 2;
                 const dx = pRight.x - pLeft.x; 
@@ -421,11 +425,16 @@
             } else {
                 d.inputState = 0; 
                 d.targetSteer = 0; 
-                d.virtualWheel.opacity *= 0.9; 
+                
+                // Efeito Fade Out (Estilo Gold Master)
+                d.virtualWheel.opacity *= 0.9;
             }
             
             d.steer += (d.targetSteer - d.steer) * CONF.INPUT_SMOOTHING;
             d.steer = Math.max(-1.5, Math.min(1.5, d.steer));
+
+            // Efeito visual no botão de Nitro (Para feedback de detecção)
+            if(nitroBtn) nitroBtn.style.opacity = (detected > 0) ? 0.3 : 1.0;
 
             // CÁLCULO DE VELOCIDADE
             let currentMax = CONF.MAX_SPEED * charStats.speedInfo;
@@ -479,13 +488,13 @@
                 }
             }
 
-            // Colisão - CORRIGIDO O ERRO DE SHAKE
+            // Colisão - COM CORREÇÃO DE SHAKE
             seg.obs.forEach(o => {
                 if(o.x < 10 && Math.abs(d.playerX - o.x) < 0.35 && Math.abs(d.playerX) < 4.0) {
                     d.speed *= CONF.CRASH_PENALTY; o.x = 999;
                     d.bounce = -15; 
                     window.Sfx.crash(); 
-                    window.Gfx.shakeScreen(15); // CORREÇÃO AQUI
+                    window.Gfx.shakeScreen(15); 
                 }
             });
 
@@ -542,7 +551,7 @@
             // CORREÇÃO DO SHAKE OFFROAD
             if(Math.abs(d.playerX) > 2.2) { 
                 d.bounce = Math.sin(d.time)*5; 
-                window.Gfx.shakeScreen(2); // CORREÇÃO AQUI TAMBÉM
+                window.Gfx.shakeScreen(2); 
             }
             d.visualTilt += (d.steer * 15 - d.visualTilt) * 0.1;
             
