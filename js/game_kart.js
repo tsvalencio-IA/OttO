@@ -1,5 +1,5 @@
 // =============================================================================
-// KART DO OTTO – VERSÃO BLINDADA (SEM LOOP INFINITO)
+// KART DO OTTO – VERSÃO FINAL (CORREÇÃO DE GFX SHAKE)
 // =============================================================================
 
 (function() {
@@ -479,17 +479,17 @@
                 }
             }
 
-            // Colisão
+            // Colisão - CORRIGIDO O ERRO DE SHAKE
             seg.obs.forEach(o => {
                 if(o.x < 10 && Math.abs(d.playerX - o.x) < 0.35 && Math.abs(d.playerX) < 4.0) {
                     d.speed *= CONF.CRASH_PENALTY; o.x = 999;
-                    d.bounce = -15; window.Sfx.crash(); window.Gfx.shake(15);
+                    d.bounce = -15; 
+                    window.Sfx.crash(); 
+                    window.Gfx.shakeScreen(15); // CORREÇÃO AQUI
                 }
             });
 
             // --- CORREÇÃO FINAL DO TRAVAMENTO ---
-            // Substituímos o LOOP WHILE por IF para garantir que NUNCA trave
-            
             d.pos += d.speed;
 
             // Se a posição for maior que a pista, volta para o começo (Safe Mode)
@@ -508,7 +508,6 @@
             }
             
             // Se a posição for negativa, volta para o fim (Safe Mode)
-            // Isso evita o loop infinito reverso que estava travando seu jogo
             if (d.pos < 0) {
                 d.pos += trackLength;
             }
@@ -539,7 +538,12 @@
             d.rank = 1 + pAhead;
 
             d.time++; d.score += d.speed * 0.01; d.bounce *= 0.8;
-            if(Math.abs(d.playerX) > 2.2) { d.bounce = Math.sin(d.time)*5; window.Gfx.shake(2); }
+            
+            // CORREÇÃO DO SHAKE OFFROAD
+            if(Math.abs(d.playerX) > 2.2) { 
+                d.bounce = Math.sin(d.time)*5; 
+                window.Gfx.shakeScreen(2); // CORREÇÃO AQUI TAMBÉM
+            }
             d.visualTilt += (d.steer * 15 - d.visualTilt) * 0.1;
             
             if (d.state === 'FINISHED') {
