@@ -251,8 +251,9 @@
                 const data = snap.val();
                 if (!data) return;
                 
+                // Snapshot imutável para evitar conflitos com o loop de render
                 const now = Date.now();
-                this.rivals = Object.keys(data)
+                const newRivals = Object.keys(data)
                     .filter(id => id !== window.System.playerId)
                     .filter(id => (now - (data[id].lastSeen || 0)) < 15000)
                     .map(id => ({
@@ -263,6 +264,8 @@
                         color: CHARACTERS[data[id].charId || 0].color
                     }));
                 
+                // Atualiza rivais de forma atômica
+                this.rivals = newRivals;
                 this.checkAutoStart(data);
             });
         },
@@ -336,11 +339,17 @@
 
             if (!segments || segments.length === 0) return 0;
             
+            // Ordem de execução crítica para evitar travamentos e garantir visibilidade
             this.updatePhysics(w, h, pose);
             this.renderWorld(ctx, w, h);
             this.renderUI(ctx, w, h);
             
-            if (this.isOnline) this.syncMultiplayer();
+            // Sincronização de rede isolada do loop de renderização principal
+            if (this.isOnline) {
+                try {
+                    this.syncMultiplayer();
+                } catch(e) { console.warn("Erro na sincronização de rede:", e); }
+            }
             
             return Math.floor(this.score);
         },
