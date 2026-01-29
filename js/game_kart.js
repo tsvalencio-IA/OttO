@@ -1,5 +1,5 @@
 // =============================================================================
-// KART DO OTTO – VERSÃO FINAL (CORREÇÃO DE RENDER E MEMÓRIA)
+// KART DO OTTO – VERSÃO FINAL (CORREÇÃO DE RENDER, MEMÓRIA E ANTI-FREEZE)
 // =============================================================================
 
 (function() {
@@ -331,27 +331,32 @@
         },
 
         // -------------------------------------------------------------
-        // UPDATE LOOP
+        // UPDATE LOOP (MODIFICADO COM TRY/CATCH PARA NÃO QUEBRAR O CORE)
         // -------------------------------------------------------------
         update: function(ctx, w, h, pose) {
-            if (this.state === 'MODE_SELECT') { this.renderModeSelect(ctx, w, h); return; }
-            if (this.state === 'LOBBY' || this.state === 'WAITING') { this.renderLobby(ctx, w, h); return; }
+            try {
+                if (this.state === 'MODE_SELECT') { this.renderModeSelect(ctx, w, h); return; }
+                if (this.state === 'LOBBY' || this.state === 'WAITING') { this.renderLobby(ctx, w, h); return; }
 
-            if (!segments || segments.length === 0) return 0;
-            
-            // Ordem de execução crítica para evitar travamentos e garantir visibilidade
-            this.updatePhysics(w, h, pose);
-            this.renderWorld(ctx, w, h);
-            this.renderUI(ctx, w, h);
-            
-            // Sincronização de rede isolada do loop de renderização principal
-            if (this.isOnline) {
-                try {
-                    this.syncMultiplayer();
-                } catch(e) { console.warn("Erro na sincronização de rede:", e); }
+                if (!segments || segments.length === 0) return 0;
+                
+                // Ordem de execução crítica para evitar travamentos e garantir visibilidade
+                this.updatePhysics(w, h, pose);
+                this.renderWorld(ctx, w, h);
+                this.renderUI(ctx, w, h);
+                
+                // Sincronização de rede isolada do loop de renderização principal
+                if (this.isOnline) {
+                    try {
+                        this.syncMultiplayer();
+                    } catch(e) { console.warn("Erro na sincronização de rede:", e); }
+                }
+                
+                return Math.floor(this.score);
+            } catch (err) {
+                console.error("ERRO CRÍTICO NO GAME LOOP:", err);
+                return 0; // Retorna 0 para não quebrar o requestAnimationFrame do core.js
             }
-            
-            return Math.floor(this.score);
         },
 
         syncMultiplayer: function() {
@@ -368,11 +373,16 @@
         },
 
         // -------------------------------------------------------------
-        // FÍSICA E DETECÇÃO (FIX DO VOLANTE)
+        // FÍSICA E DETECÇÃO (COM FIX DE TRAVAMENTO)
         // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
             const charStats = CHARACTERS[this.selectedChar];
+
+            // 1. PROTEÇÃO CONTRA VALORES CORROMPIDOS (NaN)
+            if (isNaN(d.pos)) d.pos = 0;
+            if (isNaN(d.speed)) d.speed = 0;
+            if (isNaN(d.playerX)) d.playerX = 0;
             
             let detected = 0;
             let pLeft = null, pRight = null;
@@ -436,6 +446,8 @@
             else d.speed *= CONF.FRICTION;
 
             if (Math.abs(d.playerX) > 2.2) d.speed *= CONF.OFFROAD_DECEL;
+            
+            // Re-cheque de NaN após cálculos de física
             if (isNaN(d.speed)) d.speed = 0;
             if (isNaN(d.playerX)) d.playerX = 0;
 
@@ -480,8 +492,11 @@
                 }
             });
 
-            // Loop (COM LOOP GUARD ANTI-TRAVAMENTO)
+            // Loop (COM LOOP GUARD DUPLO - ANTI-TRAVAMENTO REFORÇADO)
+            // Isso previne que o navegador trave se a posição ficar inválida
             d.pos += d.speed;
+            
+            // Guarda para frente (Já existia, mantido)
             let loopGuard = 0;
             while (d.pos >= trackLength && loopGuard < 100) {
                 d.pos -= trackLength; d.lap++;
@@ -489,7 +504,16 @@
                 if(d.lap > d.totalLaps && d.state === 'RACE') { d.state = 'FINISHED'; window.System.msg(d.rank === 1 ? "VITÓRIA!" : "FIM!"); }
                 loopGuard++;
             }
-            while(d.pos < 0) d.pos += trackLength;
+
+            // ---[A CORREÇÃO PRINCIPAL]---
+            // Guarda para trás (Onde o jogo estava travando nos vídeos)
+            let loopGuardNeg = 0;
+            while(d.pos < 0 && loopGuardNeg < 100) { 
+                d.pos += trackLength;
+                loopGuardNeg++;
+            }
+            // Se passar de 100 loops e ainda for negativo, forçamos 0 para evitar travamento
+            if (loopGuardNeg >= 100) d.pos = 0;
 
             // IA
             let pAhead = 0;
@@ -591,7 +615,11 @@
             }
 
             for(let n = 79; n >= 0; n--) {
-                const coord = segmentCoords[n]; const seg = getSegment(coord.index);
+                const coord = segmentCoords[n]; 
+                // Proteção contra undefined (Render Fix)
+                if (!coord) continue;
+                
+                const seg = getSegment(coord.index);
                 d.rivals.forEach(r => {
                     let rRelPos = r.pos - d.pos; if(rRelPos < -trackLength/2) rRelPos += trackLength; if(rRelPos > trackLength/2) rRelPos -= trackLength;
                     if (Math.abs(Math.floor(rRelPos / SEGMENT_LENGTH) - n) < 1.5 && n > 1) {
