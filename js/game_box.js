@@ -1,219 +1,123 @@
-// =============================================================================
-// LÓGICA DO JOGO: OTTO BOXING (MULTIPLAYER SHADOW EDITION)
-// =============================================================================
+/* =================================================================
+   LÓGICA DO JOGO: OTTO BOXING (AVATAR MII COMPLETO)
+   ================================================================= */
 
 (function() {
-    let particles = [];
-    let popups = [];
-
-    const CONF = {
-        GAME_DURATION: 120, TARGET_SPAWN_RATE: 700,
-        COLORS: { SHIRT: '#40a832', GLOVE: '#ffffff' }
-    };
+    let tg = []; let lastSpawn = 0; let sc = 0;
+    const CONF = { GLOVE_SIZE: 45, DURATION: 120 };
 
     const Logic = {
-        sc: 0, tg: [], lastSpawn: 0, timeLeft: 0, startTime: 0, state: 'intro',
-        
-        player: { head: {x:0,y:0}, wrists: {l:{x:0,y:0}, r:{x:0,y:0}} },
-        
-        // Multiplayer
-        roomId: 'room_box_01', isOnline: false, rivals: [], dbRef: null, lastSync: 0,
+        state: 'MODE_SELECT',
+        player: { head: {x:0,y:0}, wrists: {l:{x:0,y:0}, r:{x:0,y:0}}, shoulders: {l:{x:0,y:0}, r:{x:0,y:0}} },
+        rivals: [], isOnline: false,
 
-        init: function() { 
-            this.sc = 0; this.tg = []; particles = []; popups = [];
-            this.state = 'MODE_SELECT';
-            this.resetMultiplayerState();
-            window.System.msg("SELECIONE MODO"); 
-        },
-
-        resetMultiplayerState: function() {
-            this.isOnline = false; this.rivals = [];
-            if(this.dbRef) try{this.dbRef.child('players').off();}catch(e){}
-        },
-
-        selectMode: function(mode) {
-            if(mode === 'ONLINE') {
-                if(!window.DB) { window.System.msg("SEM REDE!"); this.selectMode('OFFLINE'); return; }
-                this.isOnline = true;
-                this.connectMultiplayer();
-                window.System.msg("CONECTANDO...");
-            } else {
-                this.isOnline = false;
-                window.System.msg("OFFLINE");
-            }
-            this.startGame();
-        },
-
-        connectMultiplayer: function() {
-            this.dbRef = window.DB.ref('rooms/' + this.roomId);
-            this.dbRef.child('players/' + window.System.playerId).set({
-                sc: 0, lastSeen: firebase.database.ServerValue.TIMESTAMP
-            });
-            this.dbRef.child('players/' + window.System.playerId).onDisconnect().remove();
-
-            this.dbRef.child('players').on('value', snap => {
-                const data = snap.val(); if(!data) return;
-                const now = Date.now();
-                this.rivals = Object.keys(data)
-                    .filter(id => id !== window.System.playerId && (now - data[id].lastSeen < 10000))
-                    .map(id => ({ id, ...data[id] }));
-            });
-        },
-
-        startGame: function() {
-            this.state = 'play'; this.timeLeft = CONF.GAME_DURATION; this.startTime = Date.now();
-            window.System.msg("LUTE!"); window.Sfx.play(600, 'square', 0.5, 0.1);
-        },
-
-        sync: function() {
-            if(!this.isOnline) return;
-            if(Date.now() - this.lastSync > 100) {
-                this.lastSync = Date.now();
-                // Otimização: Enviamos apenas partes essenciais
-                this.dbRef.child('players/' + window.System.playerId).update({
-                    sc: this.sc,
-                    head: this.player.head,
-                    wrists: this.player.wrists,
-                    lastSeen: firebase.database.ServerValue.TIMESTAMP
-                });
-            }
+        init: function() {
+            sc = 0; tg = []; this.state = 'MODE_SELECT';
         },
 
         update: function(ctx, w, h, pose) {
-            // MENU
             if(this.state === 'MODE_SELECT') {
-                ctx.fillStyle = '#222'; ctx.fillRect(0,0,w,h);
-                ctx.fillStyle = '#fff'; ctx.textAlign='center'; ctx.font="30px Arial";
-                ctx.fillText("ESQUERDA: OFFLINE | DIREITA: ONLINE", w/2, h/2);
-                
-                // Hack simples de clique
-                if(window.System.canvas.onclick === null) {
-                    window.System.canvas.onclick = (e) => {
-                        const x = e.clientX;
-                        this.selectMode(x < w/2 ? 'OFFLINE' : 'ONLINE');
-                        window.System.canvas.onclick = null;
-                    };
-                }
+                this.drawModeMenu(ctx, w, h);
                 return 0;
             }
 
-            const now = Date.now();
-            if (this.state === 'play') {
-                const elapsed = (now - this.startTime) / 1000;
-                this.timeLeft = Math.max(0, CONF.GAME_DURATION - elapsed);
-                if (this.timeLeft <= 0) { this.state = 'finished'; window.System.gameOver(Math.floor(this.sc)); }
-            }
-
-            // FUNDO
+            // Background Ringue
             ctx.fillStyle = '#111'; ctx.fillRect(0,0,w,h);
-            // Ringue
-            ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)'; ctx.lineWidth = 6;
-            ctx.beginPath(); ctx.moveTo(0, h*0.4); ctx.lineTo(w, h*0.4); ctx.stroke();
+            ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+            for(let i=0; i<w; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,h); ctx.stroke(); }
 
-            // INPUT
-            this.updatePlayerPose(pose, w, h);
-
-            // DESENHA RIVAIS (Fantasmas ao fundo)
-            this.rivals.forEach((r, i) => {
-                ctx.save(); ctx.globalAlpha = 0.4;
-                // Offset para não ficar em cima
-                const offsetX = (i + 1) * 100;
-                ctx.translate(offsetX, 0); 
-                // Se tiver dados de pose, desenha
-                if(r.head && r.wrists) {
-                    this.drawAvatar(ctx, r.head, r.wrists, '#ff0000', w, h);
-                }
-                ctx.restore();
-            });
-
-            // DESENHA JOGADOR
-            this.drawAvatar(ctx, this.player.head, this.player.wrists, CONF.COLORS.SHIRT, w, h);
-
-            // ALVOS
-            if (this.state === 'play') {
-                if (now - this.lastSpawn > CONF.TARGET_SPAWN_RATE) {
-                    this.tg.push({
-                        x: (w/2 - w*0.3) + Math.random() * (w*0.6), y: (h*0.2) + Math.random() * (h*0.4),
-                        r: w*0.07, born: now, life: 2000
-                    });
-                    this.lastSpawn = now;
-                }
-
-                for (let i = this.tg.length - 1; i >= 0; i--) {
-                    let t = this.tg[i];
-                    if (now - t.born > t.life) { this.tg.splice(i, 1); continue; }
-
-                    // Colisão
-                    const hands = [this.player.wrists.l, this.player.wrists.r];
-                    let hit = false;
-                    hands.forEach(h => { if (h.x!==0 && Math.hypot(h.x-t.x, h.y-t.y) < t.r+20) hit = true; });
-
-                    if (hit) {
-                        this.sc += 50; window.Sfx.hit(); this.tg.splice(i, 1);
-                        popups.push({x:t.x, y:t.y, text:"+50", life:1.0});
-                    } else {
-                        // Desenha Alvo
-                        ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI*2);
-                        ctx.fillStyle = 'orange'; ctx.fill(); ctx.lineWidth=4; ctx.strokeStyle='white'; ctx.stroke();
-                    }
-                }
+            if(pose) {
+                const map = window.Gfx.map;
+                const n = pose.keypoints.find(k => k.name === 'nose');
+                const lw = pose.keypoints.find(k => k.name === 'left_wrist');
+                const rw = pose.keypoints.find(k => k.name === 'right_wrist');
+                const ls = pose.keypoints.find(k => k.name === 'left_shoulder');
+                const rs = pose.keypoints.find(k => k.name === 'right_shoulder');
+                
+                if(n && n.score > 0.3) this.player.head = map(n, w, h);
+                if(lw && lw.score > 0.3) this.player.wrists.l = map(lw, w, h);
+                if(rw && rw.score > 0.3) this.player.wrists.r = map(rw, w, h);
+                if(ls && ls.score > 0.3) this.player.shoulders.l = map(ls, w, h);
+                if(rs && rs.score > 0.3) this.player.shoulders.r = map(rs, w, h);
             }
 
-            // HUD
-            ctx.fillStyle = '#fff'; ctx.font = "bold 40px Arial"; ctx.textAlign='left';
-            ctx.fillText(`SCORE: ${this.sc}`, 20, 50);
-            ctx.fillText(`TIME: ${Math.floor(this.timeLeft)}`, 20, 90);
-            
-            // Placar Rival
-            this.rivals.forEach((r, i) => {
-                ctx.font = "20px Arial"; ctx.fillStyle = "#aaa";
-                ctx.fillText(`Rival ${i+1}: ${r.sc || 0}`, 20, 130 + (i*25));
-            });
+            // Desenha Avatar do Jogador (Mii Style)
+            this.drawAvatar(ctx, this.player, '#4caf50', w);
 
-            // Popups
-            popups.forEach((p,i)=>{
-                p.y -= 2; p.life -= 0.05;
-                if(p.life<=0) popups.splice(i,1);
-                else { ctx.fillStyle=`rgba(255,255,255,${p.life})`; ctx.fillText(p.text, p.x, p.y); }
-            });
+            // Alvos
+            if(Date.now() - lastSpawn > 800) {
+                tg.push({ x: w*0.2 + Math.random()*w*0.6, y: h*0.2 + Math.random()*h*0.4, r: 50, life: 100 });
+                lastSpawn = Date.now();
+            }
 
-            this.sync();
-            return this.sc;
+            for(let i=tg.length-1; i>=0; i--) {
+                let t = tg[i]; t.life--;
+                if(t.life <= 0) { tg.splice(i,1); continue; }
+                
+                ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI*2);
+                ctx.fillStyle = 'rgba(255, 152, 0, 0.8)'; ctx.fill();
+                ctx.strokeStyle = 'white'; ctx.lineWidth = 4; ctx.stroke();
+
+                // Colisão com Luvas
+                [this.player.wrists.l, this.player.wrists.r].forEach(p => {
+                    if(Math.hypot(p.x - t.x, p.y - t.y) < t.r + CONF.GLOVE_SIZE) {
+                        sc += 50; window.Sfx.hit(); tg.splice(i,1);
+                    }
+                });
+            }
+
+            return sc;
         },
 
-        updatePlayerPose: function(pose, w, h) {
-            if (!pose || !pose.keypoints) return;
-            const find = (n) => {
-                const k = pose.keypoints.find(p => p.name === n);
-                // Mapeamento Seguro
-                return (k && k.score > 0.3) ? { x: (1 - k.x/640)*w, y: (k.y/480)*h } : null;
-            };
-            const n = find('nose'); const lw = find('left_wrist'); const rw = find('right_wrist');
-            
-            // Lerp simples
-            const lerp = (c, t) => t ? { x: c.x+(t.x-c.x)*0.5, y: c.y+(t.y-c.y)*0.5 } : c;
-            
-            if(n) this.player.head = lerp(this.player.head, n);
-            if(lw) this.player.wrists.l = lerp(this.player.wrists.l, lw);
-            if(rw) this.player.wrists.r = lerp(this.player.wrists.r, rw);
-        },
+        drawAvatar: function(ctx, p, color, w) {
+            if(!p.head.x) return;
+            const s = w * 0.005;
 
-        drawAvatar: function(ctx, head, wrists, color, w, h) {
-            if(head.x === 0) return;
+            // Corpo
+            const cx = (p.shoulders.l.x + p.shoulders.r.x) / 2 || p.head.x;
+            const cy = (p.shoulders.l.y + p.shoulders.r.y) / 2 || p.head.y + 100;
+            
+            ctx.fillStyle = color;
+            ctx.beginPath(); ctx.ellipse(cx, cy + 50, 60, 100, 0, 0, Math.PI*2); ctx.fill();
             
             // Cabeça
-            ctx.beginPath(); ctx.arc(head.x, head.y, 40, 0, Math.PI*2); 
-            ctx.fillStyle = '#ffccaa'; ctx.fill();
-            
+            ctx.fillStyle = '#ffccaa';
+            ctx.beginPath(); ctx.arc(p.head.x, p.head.y, 45, 0, Math.PI*2); ctx.fill();
+
             // Luvas
-            [wrists.l, wrists.r].forEach(wr => {
-                if(wr.x === 0) return;
-                ctx.beginPath(); ctx.arc(wr.x, wr.y, 35, 0, Math.PI*2);
-                ctx.fillStyle = '#fff'; ctx.fill();
-                ctx.strokeStyle = '#ccc'; ctx.lineWidth=3; ctx.stroke();
+            [p.wrists.l, p.wrists.r].forEach((wr, i) => {
+                if(!wr.x) return;
+                ctx.fillStyle = 'white';
+                ctx.beginPath(); ctx.arc(wr.x, wr.y, CONF.GLOVE_SIZE, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = '#ddd'; ctx.lineWidth = 3; ctx.stroke();
             });
+        },
+
+        drawModeMenu: function(ctx, w, h) {
+            ctx.fillStyle = '#222'; ctx.fillRect(0,0,w,h);
+            ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.font = "bold 40px 'Russo One'";
+            ctx.fillText("BOXE: ESCOLHA O MODO", w/2, h*0.3);
+            
+            const drawBtn = (x, y, txt, c) => {
+                ctx.fillStyle = c; ctx.fillRect(x - 200, y, 400, 80);
+                ctx.fillStyle = 'white'; ctx.font = "bold 25px sans-serif";
+                ctx.fillText(txt, x, y + 50);
+            };
+
+            drawBtn(w/2, h*0.45, "SOLO (OFFLINE)", "#e67e22");
+            drawBtn(w/2, h*0.60, "VERSUS (ONLINE)", "#27ae60");
+
+            if(!window.System.canvas.onclick) {
+                window.System.canvas.onclick = (e) => {
+                    const rect = window.System.canvas.getBoundingClientRect();
+                    const y = e.clientY - rect.top;
+                    if(y > h*0.45 && y < h*0.55) { this.state = 'play'; this.isOnline = false; window.System.msg("START!"); }
+                    if(y > h*0.60 && y < h*0.70) { this.state = 'play'; this.isOnline = true; window.System.msg("BUSCANDO RIVAL..."); }
+                    window.System.canvas.onclick = null;
+                };
+            }
         }
     };
 
-    if(window.System) window.System.registerGame('box', 'Otto Boxing', '🥊', Logic, {camOpacity: 0.2});
+    window.System.registerGame('box', 'Luigi Boxe', '🥊', Logic, {camOpacity: 0.1});
 })();
