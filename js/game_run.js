@@ -1,44 +1,45 @@
 // =============================================================================
-// LÓGICA DO JOGO: SUPER MARIO RUN (WII EDITION)
+// LÓGICA DO JOGO: SUPER MARIO RUN (WII EDITION - OBSTÁCULOS E ANIMAÇÃO)
 // ARQUITETO: PARCEIRO DE PROGRAMAÇÃO
 // =============================================================================
 
 (function() {
-    // --- CONFIGURAÇÕES ---
+    // --- CONFIGURAÇÕES VISUAIS & GAMEPLAY ---
     const CONF = {
         SPEED: 22,               // Velocidade do jogo
-        HORIZON_Y: 0.38,         // Altura do horizonte
-        FOCAL_LENGTH: 320,       // Perspectiva
+        HORIZON_Y: 0.38,         // Altura do horizonte (céu/chão)
+        FOCAL_LENGTH: 320,       // Perspectiva 3D
         COLORS: {
             SKY_TOP: '#5c94fc',    // Azul Céu Mario
             SKY_BOT: '#95b8ff',
-            GRASS: '#00cc00',      // Verde Mario
+            GRASS: '#00cc00',      // Verde Grama
             TRACK: '#d65a4e',      // Terra/Pista
-            PIPE:  '#00aa00'       // Verde Cano
+            PIPE:  '#00aa00',      // Verde Cano
+            BLOCK: '#f1c40f'       // Amarelo Bloco
         }
     };
 
     let particles = [];
     let clouds = [];
-    
+
     const Logic = {
-        // Estado
-        sc: 0,
-        f: 0,
-        lane: 0,            // -1 (Esq), 0 (Meio), 1 (Dir)
-        currentLaneX: 0,    // Animação lateral suavizada
-        action: 'run',      // 'run', 'jump', 'crouch'
+        // Estado do Jogo
+        sc: 0,              // Pontuação
+        f: 0,               // Frame counter
+        lane: 0,            // Faixa atual: -1 (Esq), 0 (Meio), 1 (Dir)
+        currentLaneX: 0,    // Posição visual suavizada
+        action: 'run',      // Ações: 'run', 'jump', 'crouch'
         
         // Calibração
-        state: 'calibrate', // calibrate -> play
-        baseNoseY: 0,
-        calibSamples: [],
+        state: 'calibrate', // calibrate -> play -> gameover
+        baseNoseY: 0,       // Altura base do nariz
+        calibSamples: [],   // Amostras para calibração
         
-        // Objetos
-        obs: [],
-        hitTimer: 0,
+        // Objetos do Mundo
+        obs: [],            // Obstáculos
+        hitTimer: 0,        // Tempo de invencibilidade/dano
         
-        // Multiplayer
+        // Multiplayer (Estrutura de dados)
         roomId: 'room_run_01',
         isOnline: false,
         rivals: [],
@@ -54,8 +55,10 @@
             this.hitTimer = 0; 
             particles = []; 
             clouds = [];
+            this.state = 'calibrate'; 
+            this.calibSamples = [];
             
-            // Gerar nuvens iniciais
+            // Gerar nuvens aleatórias no fundo
             for(let i=0; i<8; i++) {
                 clouds.push({ 
                     x: (Math.random()*2000)-1000, 
@@ -64,192 +67,141 @@
                 });
             }
 
-            this.state = 'MODE_SELECT';
             this.resetMultiplayerState();
-            window.System.msg("ESCOLHA O MODO"); 
+            window.System.msg("CALIBRANDO..."); 
         },
 
         resetMultiplayerState: function() {
             this.isOnline = false;
-            if(this.dbRef && window.System.playerId) {
-                try { this.dbRef.child('players/' + window.System.playerId).remove(); } catch(e){}
-                try { this.dbRef.child('players').off(); } catch(e){}
+            // Limpeza de Firebase se existir
+            if(window.DB && window.System.playerId) {
+                try { 
+                    window.DB.ref('rooms/' + this.roomId + '/players/' + window.System.playerId).remove(); 
+                } catch(e){}
             }
         },
 
-        // --- GESTÃO DE MODOS ---
-        selectMode: function(mode) {
-            this.state = 'calibrate';
-            this.calibSamples = [];
-            this.baseNoseY = 0;
-            
-            if(mode === 'ONLINE') {
-                if(!window.DB) { 
-                    window.System.msg("OFFLINE: SOLO"); 
-                    this.selectMode('OFFLINE'); 
-                    return; 
-                }
-                this.isOnline = true;
-                this.connectMultiplayer();
-                window.System.msg("CONECTANDO...");
-            } else {
-                this.isOnline = false;
-                window.System.msg("CALIBRANDO...");
-            }
-        },
-
-        connectMultiplayer: function() {
-            this.dbRef = window.DB.ref('rooms/' + this.roomId);
-            
-            const myData = {
-                lane: 0, 
-                action: 'run', 
-                sc: 0,
-                lastSeen: firebase.database.ServerValue.TIMESTAMP
-            };
-            this.dbRef.child('players/' + window.System.playerId).set(myData);
-            this.dbRef.child('players/' + window.System.playerId).onDisconnect().remove();
-
-            this.dbRef.child('players').on('value', snap => {
-                const data = snap.val(); if(!data) return;
-                const now = Date.now();
-                this.rivals = Object.keys(data)
-                    .filter(id => id !== window.System.playerId && (now - data[id].lastSeen < 10000))
-                    .map(id => ({ 
-                        id, ...data[id], 
-                        // Inicializa posição visual se não existir
-                        currentLaneX: data[id].currentLaneX || 0 
-                    })); 
-            });
-        },
-
-        // --- LOOP PRINCIPAL ---
+        // --- LOOP PRINCIPAL (UPDATE) ---
         update: function(ctx, w, h, pose) {
             const cx = w / 2;
             const horizon = h * CONF.HORIZON_Y;
+            this.f++;
 
-            // 1. MENU DE SELEÇÃO
-            if(this.state === 'MODE_SELECT') {
-                this.drawMenu(ctx, w, h);
-                return 0;
-            }
-
-            // 2. CALIBRAÇÃO / INPUT
-            if (pose && this.hitTimer <= 0) {
+            // 1. PROCESSAMENTO DE POSE (INPUT)
+            if(pose) {
                 const n = pose.keypoints.find(k => k.name === 'nose');
-                
-                // Mapeamento ESPELHADO: (1 - x) faz com que mover à direita na vida real mova à direita na tela
+                // Mapeamento Espelhado (1-x) para direita ser direita na tela
                 const mapPoint = (pt) => ({ x: (1 - pt.x/640)*w, y: (pt.y/480)*h });
 
-                if (n && n.score > 0.4) {
+                if(n && n.score > 0.4) {
                     const np = mapPoint(n);
 
-                    if (this.state === 'calibrate') {
+                    // FASE 1: CALIBRAÇÃO
+                    if(this.state === 'calibrate') {
                         this.calibSamples.push(np.y);
                         this.drawCalibration(ctx, w, h, cx);
                         
-                        if (this.calibSamples.length > 60) {
-                            const sum = this.calibSamples.reduce((a, b) => a + b, 0);
+                        // Após 60 frames (aprox 2 seg), define a altura base
+                        if(this.calibSamples.length > 60) {
+                            const sum = this.calibSamples.reduce((a,b)=>a+b,0);
                             this.baseNoseY = sum / this.calibSamples.length;
-                            this.state = 'play';
-                            window.System.msg("VAI!");
+                            this.state = 'play'; 
+                            window.System.msg("VAI!"); 
                             window.Sfx.play(400, 'square', 0.5, 0.1);
                         }
                         return 0;
                     } 
+                    // FASE 2: JOGO
                     else if (this.state === 'play') {
-                        // Lógica de Faixas (Espelhada)
-                        // Esquerda da tela < 35% | Direita da tela > 65%
-                        if (np.x < w * 0.35) this.lane = -1;      
-                        else if (np.x > w * 0.65) this.lane = 1;  
-                        else this.lane = 0;                       
+                        // Faixas Laterais
+                        if (np.x < w * 0.35) this.lane = -1;      // Esquerda
+                        else if (np.x > w * 0.65) this.lane = 1;  // Direita
+                        else this.lane = 0;                       // Centro
 
-                        // Pulo / Agachamento (Baseado na altura do nariz calibrada)
+                        // Pulo e Agachamento (Baseado na calibração)
                         const diff = np.y - this.baseNoseY;
-                        if (diff < -40) this.action = 'jump';      // Subiu o nariz -> Pulo
-                        else if (diff > 40) this.action = 'crouch'; // Desceu o nariz -> Agacha
+                        
+                        // Se o nariz subir muito (diff negativo) -> Pulo
+                        if (diff < -40) this.action = 'jump';
+                        // Se o nariz descer muito (diff positivo) -> Agacha
+                        else if (diff > 40) this.action = 'crouch';
                         else this.action = 'run';
                     }
                 }
             }
 
-            this.f++;
-            
-            // Suavização do movimento lateral
+            // Suavização do movimento lateral do personagem
             const targetLaneX = this.lane * (w * 0.25);
             this.currentLaneX += (targetLaneX - this.currentLaneX) * 0.15;
 
             // --- RENDERIZAÇÃO ---
             
-            // 1. Ambiente
+            // 1. Cenário (Céu e Chão)
             this.renderEnvironment(ctx, w, h, horizon);
+            
+            // 2. Pista
             this.renderTrack(ctx, w, h, cx, horizon);
             
-            // 2. Objetos e Colisões
+            // 3. Obstáculos (Lógica e Desenho)
             this.renderObjects(ctx, w, h, cx, horizon);
 
-            // 3. Rivais (Fantasmas)
-            this.rivals.forEach(r => {
-                const rTargetX = (r.lane || 0) * (w * 0.25);
-                // Interpolação simples para suavizar movimento online
-                r.currentLaneX = (r.currentLaneX || 0) + (rTargetX - (r.currentLaneX || 0)) * 0.1;
-                
-                ctx.save(); ctx.globalAlpha = 0.5;
-                let rY = h * 0.85;
-                if(r.action === 'jump') rY -= h * 0.20;
-                if(r.action === 'crouch') rY += h * 0.05;
-                
-                // Desenha Rival (Luigi ou Mario Cinza)
-                this.drawMarioBack(ctx, cx + r.currentLaneX, rY, w, r.action, false);
-                ctx.restore();
-            });
-
-            // 4. Jogador (Mario)
+            // 4. Personagem (Mario)
+            // Define altura Y baseada na ação
             let charY = h * 0.85;
             if(this.action === 'jump') charY -= h * 0.20; 
             if(this.action === 'crouch') charY += h * 0.05;
             
-            this.drawMarioBack(ctx, cx + this.currentLaneX, charY, w, this.action, true);
+            this.drawMarioBack(ctx, cx + this.currentLaneX, charY, w, this.action);
 
-            // 5. Efeitos e Dano
+            // 5. Feedback de Dano (Tela Vermelha)
             if(this.hitTimer > 0) {
                 ctx.fillStyle = `rgba(255, 0, 0, ${this.hitTimer * 0.1})`;
                 ctx.fillRect(0, 0, w, h);
                 this.hitTimer--;
             }
 
-            if(this.isOnline) this.sync();
-            return this.sc;
+            // Pontuação Simples
+            this.sc++;
+
+            return Math.floor(this.sc / 10); // Retorna pontuação dividida
         },
 
         // --- FUNÇÕES DE RENDERIZAÇÃO ---
 
         renderEnvironment: function(ctx, w, h, horizon) {
+            // Céu Degradê
             const gradSky = ctx.createLinearGradient(0, 0, 0, horizon);
             gradSky.addColorStop(0, CONF.COLORS.SKY_TOP);
             gradSky.addColorStop(1, CONF.COLORS.SKY_BOT);
             ctx.fillStyle = gradSky; ctx.fillRect(0, 0, w, horizon);
             
-            // Nuvens
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            // Nuvens (Parallax simples)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
             clouds.forEach(c => {
-                c.x -= 0.5; if(c.x < -200) c.x = w + 200;
+                c.x -= 0.5; // Move nuvens lentamente
+                if(c.x < -200) c.x = w + 200;
+                
                 const s = 1000/c.z;
                 ctx.beginPath(); 
-                ctx.arc(c.x, c.y + horizon*0.2, 30*s, 0, Math.PI*2); 
-                ctx.arc(c.x + 25*s, c.y + horizon*0.2 - 10*s, 35*s, 0, Math.PI*2);
+                ctx.arc(c.x, c.y + horizon*0.3, 40*s, 0, Math.PI*2); 
+                ctx.arc(c.x + 30*s, c.y + horizon*0.3 - 10*s, 45*s, 0, Math.PI*2);
+                ctx.arc(c.x + 60*s, c.y + horizon*0.3, 40*s, 0, Math.PI*2);
                 ctx.fill();
             });
 
+            // Chão Gramado
             ctx.fillStyle = CONF.COLORS.GRASS; ctx.fillRect(0, horizon, w, h-horizon);
         },
 
         renderTrack: function(ctx, w, h, cx, horizon) {
             ctx.save(); ctx.translate(cx, horizon);
+            
+            // Largura topo vs base (Perspectiva)
             const trackTopW = w * 0.05; 
-            const trackBotW = w * 1.1; 
+            const trackBotW = w * 1.2; 
             const groundH = h - horizon;
             
+            // Pista Principal
             ctx.beginPath();
             ctx.fillStyle = CONF.COLORS.TRACK; 
             ctx.moveTo(-trackTopW, 0); 
@@ -258,150 +210,215 @@
             ctx.lineTo(-trackBotW, groundH); 
             ctx.fill();
 
-            // Linhas brancas das raias
-            const lanes = [-1, -0.33, 0.33, 1];
-            ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 4;
-            lanes.forEach(l => {
+            // Linhas Divisórias das Faixas
+            // Lanes: -1, 0, 1 (Divisões em -0.33 e 0.33)
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)'; 
+            ctx.lineWidth = 4;
+            
+            [-0.33, 0.33].forEach(l => {
                 ctx.beginPath();
                 ctx.moveTo(l * trackTopW, 0);
                 ctx.lineTo(l * trackBotW, groundH);
                 ctx.stroke();
             });
+            
+            // Zebras laterais (Opcional, para velocidade)
+            ctx.strokeStyle = '#fff';
+            const zebraStep = (this.f % 20) * (groundH/20);
+            // (Código simplificado para evitar complexidade visual excessiva)
+
             ctx.restore();
         },
 
         renderObjects: function(ctx, w, h, cx, horizon) {
-            // Spawn Obstáculos
-            if(this.state === 'play' && this.f % 80 === 0) {
+            // GERAR OBSTÁCULOS
+            // A cada 90 frames, gera um obstáculo
+            if(this.state === 'play' && this.f % 90 === 0) {
                 const type = Math.random() < 0.5 ? 'pipe' : 'block';
-                // Random Lane: -1, 0, 1
-                const lane = Math.floor(Math.random() * 3) - 1;
-                this.obs.push({ lane: lane, z: 1500, type: type, passed: false });
+                const lane = Math.floor(Math.random() * 3) - 1; // -1, 0 ou 1
+                this.obs.push({ 
+                    lane: lane, 
+                    z: 1500, // Começa longe (Z positivo)
+                    type: type, 
+                    passed: false 
+                });
             }
 
             const groundH = h - horizon;
             const trackTopW = w * 0.05; 
-            const trackBotW = w * 1.1;
+            const trackBotW = w * 1.2;
 
-            // Render do fundo para frente
+            // Renderizar de trás para frente (Z-sorting implícito pelo loop reverso)
             for(let i = this.obs.length - 1; i >= 0; i--) {
                 let o = this.obs[i]; 
-                o.z -= CONF.SPEED;
+                o.z -= CONF.SPEED; // Move em direção à câmera
                 
+                // Se passou da câmera, remove
                 if(o.z < -200) { this.obs.splice(i, 1); continue; }
 
+                // Cálculo de Projeção 3D
                 const scale = CONF.FOCAL_LENGTH / (CONF.FOCAL_LENGTH + o.z);
+                
                 if(scale <= 0) continue;
 
+                // Posição Y na tela
                 const screenY = horizon + (groundH * scale); 
-                const size = (w * 0.18) * scale; // Tamanho do obstáculo
+                // Tamanho visual
+                const size = (w * 0.18) * scale; 
                 
-                // Calcula posição X com base na perspectiva
+                // Posição X na tela (Interpolando largura da pista)
                 const currentTrackW = trackTopW + (trackBotW - trackTopW) * scale;
-                const laneSpread = currentTrackW * CONF.LANE_SPREAD;
-                const sx = cx + (o.lane * laneSpread);
+                const laneSpread = currentTrackW * 0.8; // Espalhamento das faixas
+                const sx = cx + (o.lane * laneSpread * 0.55); // *0.55 para ajustar ao centro das faixas
 
-                // Desenha Obstáculo
+                // DESENHO DO OBSTÁCULO
                 if(o.type === 'pipe') {
-                    // Cano Verde (Precisa Pular)
+                    // --- CANO VERDE (Deve Pular) ---
                     const pH = size;
-                    ctx.fillStyle = '#00aa00'; ctx.fillRect(sx-size/2, screenY-pH, size, pH);
-                    ctx.strokeStyle = '#004400'; ctx.lineWidth = 2 * scale; ctx.strokeRect(sx-size/2, screenY-pH, size, pH);
-                    // Borda do cano
-                    ctx.fillRect(sx-size/2 - 5*scale, screenY-pH, size + 10*scale, size*0.25);
-                    ctx.strokeRect(sx-size/2 - 5*scale, screenY-pH, size + 10*scale, size*0.25);
+                    // Corpo do cano
+                    ctx.fillStyle = CONF.COLORS.PIPE; 
+                    ctx.fillRect(sx - size/2, screenY - pH, size, pH);
+                    ctx.strokeStyle = '#004400'; 
+                    ctx.lineWidth = 2; 
+                    ctx.strokeRect(sx - size/2, screenY - pH, size, pH);
+                    
+                    // Borda superior do cano (Rim)
+                    const rimH = size * 0.25;
+                    const rimW = size * 1.1;
+                    ctx.fillRect(sx - rimW/2, screenY - pH, rimW, rimH);
+                    ctx.strokeRect(sx - rimW/2, screenY - pH, rimW, rimH);
+                    
+                    // Brilho
+                    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                    ctx.fillRect(sx - size/2 + size*0.1, screenY - pH + 5, size*0.1, pH-10);
+
                 } else {
-                    // Bloco ? (Precisa Agachar)
-                    const bH = size * 0.7;
-                    const bY = screenY - (size * 2.0); // Flutuando alto
-                    ctx.fillStyle = '#f1c40f'; ctx.fillRect(sx-size/2, bY, size, size);
-                    ctx.fillStyle = '#000'; ctx.font = `bold ${size*0.6}px monospace`; ctx.textAlign='center';
+                    // --- BLOCO '?' (Deve Agachar) ---
+                    // Flutua no ar
+                    const bY = screenY - (size * 2.2); 
+                    
+                    // Caixa Dourada
+                    ctx.fillStyle = CONF.COLORS.BLOCK; 
+                    ctx.fillRect(sx - size/2, bY, size, size);
+                    ctx.strokeStyle = '#c49c00'; 
+                    ctx.lineWidth = 3; 
+                    ctx.strokeRect(sx - size/2, bY, size, size);
+                    
+                    // Pontos nos cantos (Parafusos)
+                    ctx.fillStyle = '#000';
+                    const dotS = size * 0.1;
+                    ctx.fillRect(sx - size/2 + 2, bY + 2, dotS, dotS);
+                    ctx.fillRect(sx + size/2 - 2 - dotS, bY + 2, dotS, dotS);
+                    ctx.fillRect(sx - size/2 + 2, bY + size - 2 - dotS, dotS, dotS);
+                    ctx.fillRect(sx + size/2 - 2 - dotS, bY + size - 2 - dotS, dotS, dotS);
+
+                    // Interrogação
+                    ctx.fillStyle = '#fff'; 
+                    ctx.font = `bold ${size*0.6}px monospace`; 
+                    ctx.textAlign='center';
                     ctx.fillText("?", sx, bY + size*0.7);
                     
                     // Sombra no chão
                     ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                    ctx.beginPath(); ctx.ellipse(sx, screenY, size*0.5, size*0.2, 0, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); 
+                    ctx.ellipse(sx, screenY, size*0.5, size*0.15, 0, 0, Math.PI*2); 
+                    ctx.fill();
                 }
 
                 // COLISÃO
-                if(o.z < 20 && o.z > -20 && this.state === 'play' && o.lane === this.lane) {
+                // Z entre 50 e -50 (perto do jogador) E mesma faixa
+                if(o.z < 50 && o.z > -50 && this.state === 'play' && o.lane === this.lane) {
                     let hit = false;
                     
+                    // Regras
                     if(o.type === 'pipe' && this.action !== 'jump') hit = true;
                     if(o.type === 'block' && this.action !== 'crouch') hit = true;
 
                     if(hit) {
-                        this.hitTimer = 10;
-                        window.Sfx.crash();
-                        window.Gfx.shakeScreen(15);
-                        window.System.gameOver(this.sc);
+                        this.hitTimer = 15; // Frames de tela vermelha
+                        window.Sfx.play(150, 'sawtooth', 0.2, 0.2); // Som de dano
+                        this.sc = Math.max(0, this.sc - 500); // Perde pontos
+                        window.System.msg("BATEU!");
+                        o.passed = true; // Marca como passado para não bater 2x
                     } else if(!o.passed) {
+                        // Passou com sucesso
                         this.sc += 100;
-                        window.Sfx.coin();
+                        window.Sfx.play(1200, 'sine', 0.1, 0.1); // Som de moeda
                         o.passed = true;
                     }
                 }
             }
         },
 
-        drawMarioBack: function(ctx, x, y, w, action, isPlayer) {
-            const s = w * 0.0035; 
+        // --- DESENHO DO PERSONAGEM (MARIO COSTAS) ---
+        drawMarioBack: function(ctx, x, y, w, action) {
+            const s = w * 0.0035; // Escala
             ctx.save(); 
             ctx.translate(x, y); 
             ctx.scale(s, s);
             
-            const cycle = Math.sin(this.f * 0.5) * 15;
+            // Ciclo de animação para correr
+            const cycle = (this.action === 'run') ? Math.sin(this.f * 0.5) * 15 : 0;
             
-            // Cores (Se for rival, fica cinzento/fantasma)
-            const C_SHIRT = isPlayer ? '#ff0000' : '#888';
-            const C_OVERALL = isPlayer ? '#0000ff' : '#666';
+            // Cores
+            const C_SHIRT = '#ff0000';
+            const C_OVERALL = '#0000ff';
             const C_SKIN = '#ffccaa';
             const C_HAIR = '#4a3222';
 
-            // 1. Pernas
+            // 1. Pernas (Animadas)
             ctx.fillStyle = C_OVERALL;
             if(action === 'run') {
-                ctx.fillRect(-15+cycle, 0, 12, 30); 
-                ctx.fillRect(5-cycle, 0, 12, 30);
+                ctx.fillRect(-15+cycle, 0, 12, 35); // Perna Esq
+                ctx.fillRect(5-cycle, 0, 12, 35);   // Perna Dir
+                // Sapatos
+                ctx.fillStyle = '#4a3222';
+                ctx.fillRect(-17+cycle, 35, 16, 10);
+                ctx.fillRect(3-cycle, 35, 16, 10);
             } else if (action === 'jump') {
+                // Pernas encolhidas
                 ctx.fillRect(-18, -10, 12, 25);
-                ctx.fillRect(6, 5, 12, 25);
+                ctx.fillRect(6, -5, 12, 20);
+                // Sapatos
+                ctx.fillStyle = '#4a3222';
+                ctx.fillRect(-20, 15, 16, 10);
+                ctx.fillRect(4, 15, 16, 10);
             } else { // Crouch
-                ctx.fillRect(-20, 5, 12, 15);
-                ctx.fillRect(8, 5, 12, 15);
+                ctx.fillRect(-20, 10, 12, 15);
+                ctx.fillRect(8, 10, 12, 15);
             }
 
             // 2. Tronco (Costas)
             const bodyY = action === 'crouch' ? 10 : -35;
             
-            // Camisa
+            // Camisa Vermelha (Braços abertos)
             ctx.fillStyle = C_SHIRT;
-            ctx.beginPath(); ctx.arc(0, bodyY, 25, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(0, bodyY, 28, 0, Math.PI*2); ctx.fill();
             
-            // Macacão (Parte traseira)
+            // Macacão Azul (Costas)
             ctx.fillStyle = C_OVERALL;
-            ctx.fillRect(-18, bodyY, 36, 25);
-            ctx.beginPath(); ctx.arc(0, bodyY+25, 18, 0, Math.PI, false); ctx.fill();
+            ctx.fillRect(-18, bodyY, 36, 30);
+            ctx.beginPath(); ctx.arc(0, bodyY+30, 18, 0, Math.PI, false); ctx.fill();
 
             // Alças Amarelas
-            ctx.strokeStyle = '#ffff00'; ctx.lineWidth = 4;
+            ctx.strokeStyle = '#ffff00'; ctx.lineWidth = 5;
             ctx.beginPath(); ctx.moveTo(-15, bodyY-15); ctx.lineTo(-15, bodyY+15); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(15, bodyY-15); ctx.lineTo(15, bodyY+15); ctx.stroke();
 
             // 3. Cabeça (Nuca)
-            const headY = bodyY - 25;
+            const headY = bodyY - 30;
             
-            // Pele
+            // Pele (Pescoço/Orelhas)
             ctx.fillStyle = C_SKIN;
-            ctx.beginPath(); ctx.arc(0, headY, 22, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(0, headY, 24, 0, Math.PI*2); ctx.fill();
             
-            // Cabelo (Castanho)
+            // Cabelo
             ctx.fillStyle = C_HAIR;
-            ctx.beginPath(); ctx.arc(0, headY+5, 20, 0, Math.PI, false); ctx.fill();
+            ctx.beginPath(); ctx.arc(0, headY+5, 22, 0, Math.PI, false); ctx.fill();
 
-            // Boné (Visão Traseira)
-            ctx.fillStyle = C_SHIRT; // Vermelho
-            ctx.beginPath(); ctx.arc(0, headY-5, 23, Math.PI, 0); ctx.fill();
+            // Boné Vermelho (Parte de trás)
+            ctx.fillStyle = C_SHIRT;
+            ctx.beginPath(); ctx.arc(0, headY-5, 25, Math.PI, 0); ctx.fill();
 
             ctx.restore();
         },
@@ -410,49 +427,16 @@
             ctx.fillStyle = "rgba(0,0,0,0.9)"; ctx.fillRect(0,0,w,h);
             ctx.fillStyle = "#fff"; ctx.font = "bold 30px Arial"; ctx.textAlign = "center";
             
-            ctx.fillText("FIQUE EM POSIÇÃO NEUTRA", cx, h*0.4);
-            ctx.fillText("PARA CALIBRAR", cx, h*0.45);
+            ctx.fillText("FIQUE EM PÉ E PARADO", cx, h*0.4);
+            ctx.fillText("CALIBRANDO...", cx, h*0.46);
             
             const pct = this.calibSamples.length / 60;
             ctx.fillStyle = "#3498db"; 
             ctx.fillRect(cx - 150, h*0.55, 300 * pct, 20);
             ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; 
             ctx.strokeRect(cx - 150, h*0.55, 300, 20);
-        },
-
-        drawMenu: function(ctx, w, h) {
-            ctx.fillStyle = "#222"; ctx.fillRect(0,0,w,h);
-            ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold 35px 'Russo One'";
-            ctx.fillText("SUPER RUN", w/2, h*0.3);
-            
-            ctx.fillStyle = "#e67e22"; ctx.fillRect(w/2-150, h*0.4, 300, 60);
-            ctx.fillStyle = "#27ae60"; ctx.fillRect(w/2-150, h*0.6, 300, 60);
-            
-            ctx.fillStyle = "#fff"; ctx.font = "20px Arial";
-            ctx.fillText("CIMA: OFFLINE", w/2, h*0.4+38);
-            ctx.fillText("BAIXO: ONLINE", w/2, h*0.6+38);
-
-            if(!window.System.canvas.onclick) {
-                window.System.canvas.onclick = (e) => {
-                    const y = e.clientY - window.System.canvas.getBoundingClientRect().top;
-                    this.selectMode(y < h/2 ? 'OFFLINE' : 'ONLINE');
-                    window.System.canvas.onclick = null;
-                };
-            }
-        },
-
-        sync: function() {
-            if(!this.isOnline || !this.dbRef) return;
-            if(Date.now() - this.lastSync > 100) {
-                this.lastSync = Date.now();
-                this.dbRef.child('players/' + window.System.playerId).update({
-                    lane: this.lane, action: this.action, sc: Math.floor(this.sc),
-                    currentLaneX: this.currentLaneX, // Envia para suavizar no rival
-                    lastSeen: firebase.database.ServerValue.TIMESTAMP
-                });
-            }
         }
     };
 
-    window.System.registerGame('run', 'Otto Super Run', '🏃', Logic, {camOpacity: 0.3});
+    window.System.registerGame('run', 'Super Run', '🏃', Logic, {camOpacity: 0.3});
 })();
