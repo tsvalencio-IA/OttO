@@ -1,214 +1,275 @@
 // =============================================================================
-// LÓGICA DO JOGO: OTTO BOXING (LUIGI'S GYM WII EDITION)
-// ARQUITETO: SENIOR DEV V3 (RESTAURAÇÃO DE CENÁRIO E AVATAR)
+// LÓGICA DO JOGO: LUIGI BOXING (1ST PERSON VIEW RESTORED)
+// ARQUITETO: SENIOR DEV V3
 // =============================================================================
 
 (function() {
-    let tg = [], lastSpawn = 0;
-    const CONF = { DURATION: 120, TARGET_RATE: 850, COLOR_LUIGI: '#40a832' };
+    const CONF = {
+        DURATION: 99,
+        SPAWN_RATE: 800,
+        COLORS: { HAT: '#40a832', SHIRT: '#40a832', OVERALL: '#2b3a8f', SKIN: '#ffccaa' }
+    };
+
+    let particles = [], popups = [];
 
     const Logic = {
-        sc: 0, 
-        state: 'MODE_SELECT', 
-        timeLeft: 120, 
-        startTime: 0,
-        // Estrutura do Jogador
-        player: { 
-            head: {x:0, y:0}, 
-            wrists: {l:{x:0,y:0}, r:{x:0,y:0}}, 
-            shoulders: {l:{x:0,y:0}, r:{x:0,y:0}} 
+        sc: 0, state: 'MODE_SELECT', timeLeft: 99, startTime: 0,
+        tg: [], lastSpawn: 0,
+        
+        // Estado Físico do Jogador (Suavizado)
+        player: {
+            head: {x:0, y:0},
+            shoulders: {l:{x:0,y:0}, r:{x:0,y:0}},
+            elbows: {l:{x:0,y:0}, r:{x:0,y:0}},
+            wrists: {l:{x:0,y:0}, r:{x:0,y:0}},
+            hp: 100
         },
-        rivals: [], 
-        isOnline: false, 
-        dbRef: null,
+
+        isOnline: false, roomId: 'room_box_01', dbRef: null, opponent: null,
 
         init: function() { 
-            this.sc = 0; 
-            tg = []; 
-            this.state = 'MODE_SELECT'; 
-            window.System.msg("SELECIONE O MODO");
+            this.sc = 0; this.tg = []; particles = []; popups = [];
+            this.state = 'MODE_SELECT';
+            this.player.hp = 100;
+            window.System.msg("LUIGI BOXING");
         },
 
         selectMode: function(mode) {
-            this.state = 'play'; 
+            this.state = 'play';
             this.startTime = Date.now();
+            this.timeLeft = CONF.DURATION;
             if(mode === 'ONLINE') {
-                this.isOnline = true; 
+                if(!window.DB) { this.selectMode('OFFLINE'); return; }
+                this.isOnline = true;
                 this.connectMultiplayer();
-                window.System.msg("A CONECTAR...");
+                window.System.msg("FIGHT ONLINE!");
             } else {
-                window.System.msg("LUIGI TIME!");
+                window.System.msg("TREINO!");
             }
+            window.Sfx.play(600, 'square', 0.5, 0.2);
         },
 
         connectMultiplayer: function() {
-            this.dbRef = window.DB.ref('rooms/box_01');
-            this.dbRef.child('players/' + window.System.playerId).onDisconnect().remove();
+            this.dbRef = window.DB.ref('rooms/' + this.roomId);
+            const myRef = this.dbRef.child('players/' + window.System.playerId);
+            myRef.set({ hp: 100, lastSeen: firebase.database.ServerValue.TIMESTAMP });
+            myRef.onDisconnect().remove();
+
             this.dbRef.child('players').on('value', snap => {
-                const data = snap.val(); 
-                if(!data) return;
-                this.rivals = Object.keys(data)
-                    .filter(id => id !== window.System.playerId)
-                    .map(id => ({ id, ...data[id] }));
+                const data = snap.val(); if(!data) return;
+                const oppId = Object.keys(data).find(id => id !== window.System.playerId);
+                if(oppId) {
+                    this.opponent = { id: oppId, ...data[oppId] };
+                } else { this.opponent = null; }
             });
         },
 
         update: function(ctx, w, h, pose) {
-            if(this.state === 'MODE_SELECT') { 
-                this.drawMenu(ctx, w, h); 
-                return 0; 
-            }
-
-            // --- 1. RENDERIZAÇÃO DO CENÁRIO (RINGUE) ---
-            this.drawScenery(ctx, w, h);
-
-            // --- 2. PROCESSAMENTO DE MOVIMENTO ---
-            if(pose) {
-                const map = window.Gfx.map;
-                const kp = pose.keypoints;
-                const get = (name) => { 
-                    const k = kp.find(p => p.name === name); 
-                    return (k && k.score > 0.3) ? map(k, w, h) : null; 
-                };
-                
-                const n = get('nose'); 
-                const lw = get('left_wrist'); 
-                const rw = get('right_wrist');
-                const ls = get('left_shoulder'); 
-                const rs = get('right_shoulder');
-
-                if(n) this.player.head = n;
-                if(lw) this.player.wrists.l = lw; 
-                if(rw) this.player.wrists.r = rw;
-                if(ls) this.player.shoulders.l = ls; 
-                if(rs) this.player.shoulders.r = rs;
-            }
-
-            // --- 3. RENDERIZAÇÃO DE JOGADORES ---
-            // Rivais (Fantasmas)
-            this.rivals.forEach(r => {
-                ctx.save(); 
-                ctx.globalAlpha = 0.3;
-                this.drawLuigi(ctx, r, '#ff5555', w);
-                ctx.restore();
-            });
-
-            // Luigi (Jogador Atual)
-            this.drawLuigi(ctx, this.player, CONF.COLOR_LUIGI, w);
-
-            // --- 4. LÓGICA DE ALVOS (TREINO) ---
             const now = Date.now();
-            if(now - lastSpawn > CONF.TARGET_RATE) {
-                tg.push({ 
-                    x: w*0.2 + Math.random()*w*0.6, 
-                    y: h*0.2 + Math.random()*h*0.4, 
-                    r: 50, 
-                    life: 100 
-                });
-                lastSpawn = now;
+
+            if(this.state === 'MODE_SELECT') { this.drawMenu(ctx, w, h); return 0; }
+            if(this.state === 'finished') return this.sc;
+
+            // Tempo
+            if(this.state === 'play') {
+                const elapsed = (now - this.startTime) / 1000;
+                this.timeLeft = Math.max(0, CONF.DURATION - elapsed);
+                if(this.timeLeft <= 0 || this.player.hp <= 0) {
+                    this.state = 'finished';
+                    window.System.gameOver(Math.floor(this.sc));
+                }
             }
 
-            for(let i = tg.length - 1; i >= 0; i--) {
-                let t = tg[i]; 
-                t.life--;
-                if(t.life <= 0) { tg.splice(i, 1); continue; }
-                
-                // Desenha Alvo estilo Wii Boxing
-                ctx.fillStyle = '#ff9800'; 
-                ctx.beginPath(); 
-                ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2); 
-                ctx.fill();
-                ctx.strokeStyle = 'white'; 
-                ctx.lineWidth = 5; 
-                ctx.stroke();
+            // 1. FUNDO (RINGUE)
+            this.drawRing(ctx, w, h);
 
-                // Colisão com as Luvas
-                [this.player.wrists.l, this.player.wrists.r].forEach(wr => {
-                    if(wr.x && Math.hypot(wr.x - t.x, wr.y - t.y) < t.r + 40) {
-                        this.sc += 50; 
-                        window.Sfx.hit(); 
-                        tg.splice(i, 1);
-                    }
-                });
+            // 2. POSE (AVATAR)
+            this.updatePlayerPose(pose, w, h);
+            
+            // Desenha Oponente (se Online) ou Saco de Pancada (Treino)
+            if(this.isOnline && this.opponent) {
+                this.drawOpponent(ctx, w, h);
+            } else {
+                // Lógica de Alvos (Treino)
+                if(now - this.lastSpawn > CONF.SPAWN_RATE) {
+                    const range = w * 0.3;
+                    this.tg.push({
+                        x: (w/2 - range) + Math.random()*(range*2),
+                        y: h*0.3 + Math.random()*(h*0.3),
+                        r: w*0.06, born: now, life: 2000
+                    });
+                    this.lastSpawn = now;
+                }
+
+                // Render Alvos
+                for (let i = this.tg.length - 1; i >= 0; i--) {
+                    let t = this.tg[i];
+                    let pct = 1 - ((now - t.born) / t.life);
+                    if(pct <= 0) { this.tg.splice(i, 1); continue; }
+
+                    // Desenha Alvo
+                    ctx.save(); ctx.translate(t.x, t.y); ctx.scale(pct, pct);
+                    ctx.beginPath(); ctx.arc(0,0,t.r,0,Math.PI*2); 
+                    ctx.fillStyle = ctx.createRadialGradient(-10,-10,5,0,0,t.r);
+                    ctx.fillStyle.addColorStop(0, '#ffaa00'); ctx.fillStyle.addColorStop(1, '#cc5500');
+                    ctx.fill(); ctx.strokeStyle='#fff'; ctx.lineWidth=4; ctx.stroke();
+                    ctx.restore();
+
+                    // Colisão
+                    [this.player.wrists.l, this.player.wrists.r].forEach(wr => {
+                        if(wr.x !== 0 && Math.hypot(wr.x - t.x, wr.y - t.y) < t.r + 30) {
+                            this.sc += 50; window.Sfx.hit(); window.System.msg("POW!");
+                            this.spawnParticles(t.x, t.y, 10, '#ffff00');
+                            this.tg.splice(i, 1);
+                        }
+                    });
+                }
             }
 
-            // Sincronização Online
+            // 3. DESENHA AVATAR (1ª PESSOA)
+            this.drawLuigiAvatar(ctx, w, h);
+
+            // HUD
+            this.drawHUD(ctx, w, h);
+            this.renderEffects(ctx);
+
+            // Sync
             if(this.isOnline && now % 5 === 0) {
                 this.dbRef.child('players/' + window.System.playerId).update({
-                    head: this.player.head, 
-                    wrists: this.player.wrists, 
-                    sc: this.sc, 
-                    lastSeen: firebase.database.ServerValue.TIMESTAMP
+                    head: this.player.head, wrists: this.player.wrists, shoulders: this.player.shoulders, elbows: this.player.elbows,
+                    hp: this.player.hp, lastSeen: firebase.database.ServerValue.TIMESTAMP
                 });
             }
 
             return this.sc;
         },
 
-        drawScenery: function(ctx, w, h) {
-            ctx.fillStyle = '#1a1a1a'; 
-            ctx.fillRect(0, 0, w, h);
-            
-            // Cordas do Ringue (Perspectiva)
-            ctx.strokeStyle = '#f44336'; ctx.lineWidth = 12; // Corda Superior
-            ctx.beginPath(); ctx.moveTo(0, h * 0.4); ctx.lineTo(w, h * 0.4); ctx.stroke();
-            
-            ctx.strokeStyle = '#2196f3'; ctx.lineWidth = 12; // Corda Inferior
-            ctx.beginPath(); ctx.moveTo(0, h * 0.6); ctx.lineTo(w, h * 0.6); ctx.stroke();
-            
-            // Tapete do Ringue com Degradê
-            const grad = ctx.createLinearGradient(0, h * 0.6, 0, h);
-            grad.addColorStop(0, '#2c3e50'); 
-            grad.addColorStop(1, '#111111');
-            ctx.fillStyle = grad; 
-            ctx.fillRect(0, h * 0.6, w, h * 0.4);
+        updatePlayerPose: function(pose, w, h) {
+            if (!pose || !pose.keypoints) return;
+            const kp = pose.keypoints;
+            const find = (n) => {
+                const k = kp.find(p => p.name === n);
+                return (k && k.score > 0.3) ? window.Gfx.map(k, w, h) : null;
+            };
+
+            // Lerp para suavizar movimento
+            const lerp = (c, t) => t ? { x: c.x + (t.x - c.x) * 0.4, y: c.y + (t.y - c.y) * 0.4 } : c;
+
+            const n = find('nose'); if(n) this.player.head = lerp(this.player.head, n);
+            const ls = find('left_shoulder'); if(ls) this.player.shoulders.l = lerp(this.player.shoulders.l, ls);
+            const rs = find('right_shoulder'); if(rs) this.player.shoulders.r = lerp(this.player.shoulders.r, rs);
+            const le = find('left_elbow'); if(le) this.player.elbows.l = lerp(this.player.elbows.l, le);
+            const re = find('right_elbow'); if(re) this.player.elbows.r = lerp(this.player.elbows.r, re);
+            const lw = find('left_wrist'); if(lw) this.player.wrists.l = lerp(this.player.wrists.l, lw);
+            const rw = find('right_wrist'); if(rw) this.player.wrists.r = lerp(this.player.wrists.r, rw);
         },
 
-        drawLuigi: function(ctx, p, color, w) {
-            if(!p.head || !p.head.x) return;
-            const s = w * 0.005;
+        drawLuigiAvatar: function(ctx, w, h) {
+            const p = this.player;
+            if(p.shoulders.l.x === 0) return;
+
+            // Escala baseada na largura dos ombros
+            const sDist = Math.hypot(p.shoulders.r.x - p.shoulders.l.x, p.shoulders.r.y - p.shoulders.l.y);
+            const scale = sDist / 120; 
+
+            // Braços
+            const drawArm = (s, e, w) => {
+                if(s.x === 0 || e.x === 0 || w.x === 0) return;
+                ctx.lineWidth = 30 * scale; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+                ctx.strokeStyle = CONF.COLORS.SHIRT;
+                ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(e.x, e.y); ctx.lineTo(w.x, w.y); ctx.stroke();
+            };
+            drawArm(p.shoulders.l, p.elbows.l, p.wrists.l);
+            drawArm(p.shoulders.r, p.elbows.r, p.wrists.r);
+
+            // Luvas
+            const drawGlove = (pos) => {
+                if(pos.x === 0) return;
+                const r = 40 * scale;
+                const g = ctx.createRadialGradient(pos.x-10, pos.y-10, 5, pos.x, pos.y, r);
+                g.addColorStop(0, '#fff'); g.addColorStop(1, '#ddd');
+                ctx.fillStyle = g; ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = '#aaa'; ctx.lineWidth = 2; ctx.stroke();
+            };
+            drawGlove(p.wrists.l);
+            drawGlove(p.wrists.r);
+        },
+
+        drawOpponent: function(ctx, w, h) {
+            // Desenha fantasma do oponente
+            const o = this.opponent;
+            if(!o.head) return;
+
+            ctx.save(); ctx.globalAlpha = 0.6;
             
-            // 1. Corpo (Macacão)
-            ctx.fillStyle = color;
-            ctx.beginPath(); 
-            ctx.ellipse(p.head.x, p.head.y + 120, 55, 90, 0, 0, Math.PI * 2); 
-            ctx.fill();
+            // Cabeça
+            ctx.fillStyle = '#ff5555'; ctx.beginPath(); ctx.arc(o.head.x, o.head.y, 40, 0, Math.PI*2); ctx.fill();
             
-            // 2. Cabeça
-            ctx.fillStyle = '#ffccaa'; // Pele
-            ctx.beginPath(); 
-            ctx.arc(p.head.x, p.head.y, 45, 0, Math.PI * 2); 
-            ctx.fill();
-            
-            // 3. Boné
-            ctx.fillStyle = color;
-            ctx.beginPath(); 
-            ctx.arc(p.head.x, p.head.y - 12, 50, Math.PI, 0); 
-            ctx.fill();
-            
-            // 4. Luvas (Wrists detetados)
-            [p.wrists.l, p.wrists.r].forEach(wr => {
-                if(!wr || !wr.x) return;
-                ctx.fillStyle = 'white';
-                ctx.beginPath(); 
-                ctx.arc(wr.x, wr.y, 42, 0, Math.PI * 2); 
-                ctx.fill();
-                ctx.strokeStyle = '#dddddd'; 
-                ctx.lineWidth = 3; 
-                ctx.stroke();
+            // Luvas do Oponente
+            const drawOGlove = (pos) => {
+                if(!pos || pos.x === 0) return;
+                ctx.fillStyle = '#ff0000'; ctx.beginPath(); ctx.arc(pos.x, pos.y, 40, 0, Math.PI*2); ctx.fill();
+                
+                // Hitbox detection (Eu batendo nele)
+                [this.player.wrists.l, this.player.wrists.r].forEach(wr => {
+                    if(Math.hypot(wr.x - pos.x, wr.y - pos.y) < 60) {
+                        // Bloqueio!
+                        window.Sfx.play(150, 'sawtooth', 0.1, 0.1);
+                        this.spawnParticles(pos.x, pos.y, 5, '#aaa');
+                    }
+                });
+            };
+            drawOGlove(o.wrists?.l);
+            drawOGlove(o.wrists?.r);
+
+            // Hitbox Cabeça (Acerto)
+            [this.player.wrists.l, this.player.wrists.r].forEach(wr => {
+                if(Math.hypot(wr.x - o.head.x, wr.y - o.head.y) < 70) {
+                    window.Sfx.hit();
+                    this.sc += 10;
+                    this.spawnParticles(o.head.x, o.head.y, 10, '#ff0000');
+                    // Idealmente enviaríamos o dano via DB, mas por simplicidade apenas visual aqui
+                }
             });
+
+            ctx.restore();
         },
 
+        drawRing: function(ctx, w, h) {
+            // Fundo e Holofotes
+            const grad = ctx.createRadialGradient(w/2, 0, 100, w/2, h, w);
+            grad.addColorStop(0, '#333'); grad.addColorStop(1, '#111');
+            ctx.fillStyle = grad; ctx.fillRect(0,0,w,h);
+
+            // Cordas
+            ctx.strokeStyle = '#d32f2f'; ctx.lineWidth = 8;
+            ctx.beginPath(); ctx.moveTo(0, h*0.4); ctx.lineTo(w, h*0.4); ctx.stroke();
+            ctx.strokeStyle = '#fff'; 
+            ctx.beginPath(); ctx.moveTo(0, h*0.6); ctx.lineTo(w, h*0.6); ctx.stroke();
+            ctx.strokeStyle = '#1976d2'; 
+            ctx.beginPath(); ctx.moveTo(0, h*0.8); ctx.lineTo(w, h*0.8); ctx.stroke();
+        },
+
+        drawHUD: function(ctx, w, h) {
+            // Tempo LCD
+            ctx.fillStyle = '#000'; ctx.beginPath(); ctx.roundRect(w/2-60, 20, 120, 50, 10); ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+            ctx.fillStyle = this.timeLeft < 10 ? '#f00' : '#0f0';
+            ctx.font = "bold 30px 'Russo One'"; ctx.textAlign = 'center';
+            ctx.fillText(Math.floor(this.timeLeft), w/2, 57);
+
+            // Barra de Vida
+            ctx.fillStyle = '#555'; ctx.fillRect(20, 20, 200, 20);
+            ctx.fillStyle = this.player.hp > 30 ? '#0f0' : '#f00';
+            ctx.fillRect(22, 22, 196 * (this.player.hp/100), 16);
+        },
+        
         drawMenu: function(ctx, w, h) {
-            ctx.fillStyle = '#111111'; 
-            ctx.fillRect(0, 0, w, h);
-            ctx.fillStyle = '#ffffff'; 
-            ctx.textAlign = 'center'; 
-            ctx.font = "bold 35px 'Russo One'";
-            ctx.fillText("BOXE LUIGI: SELECIONE O MODO", w / 2, h / 2 - 40);
-            
-            ctx.font = "22px sans-serif";
-            ctx.fillText("ESQUERDA: SOLO | DIREITA: ONLINE", w / 2, h / 2 + 20);
+            ctx.fillStyle = '#000'; ctx.fillRect(0,0,w,h);
+            ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = "bold 40px 'Russo One'";
+            ctx.fillText("BOXE LUIGI", w/2, h/2 - 40);
+            ctx.font = "20px sans-serif";
+            ctx.fillText("ESQUERDA: TREINO | DIREITA: ONLINE", w/2, h/2 + 30);
             
             if(!window.System.canvas.onclick) {
                 window.System.canvas.onclick = (e) => {
@@ -220,11 +281,19 @@
             }
         },
 
-        cleanup: function() { 
-            if(this.dbRef) this.dbRef.child('players/' + window.System.playerId).remove(); 
-            window.System.canvas.onclick = null;
+        spawnParticles: function(x, y, count, color) {
+            for(let i=0; i<count; i++) particles.push({x, y, vx:(Math.random()-0.5)*15, vy:(Math.random()-0.5)*15, life:1.0, color});
+        },
+        
+        renderEffects: function(ctx) {
+            particles.forEach((p, i) => {
+                p.x += p.vx; p.y += p.vy; p.life -= 0.05;
+                if(p.life <= 0) particles.splice(i,1);
+                else { ctx.globalAlpha = p.life; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill(); }
+            });
+            ctx.globalAlpha = 1;
         }
     };
 
-    window.System.registerGame('box', 'Luigi Boxe', '🥊', Logic, {camOpacity: 0.15});
+    window.System.registerGame('box', 'Luigi Box', '🥊', Logic, {camOpacity: 0.1});
 })();
