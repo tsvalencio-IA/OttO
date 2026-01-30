@@ -9,8 +9,8 @@
     // -----------------------------------------------------------------
     const CHARACTERS = [
         { id: 0, name: 'OTTO', color: '#e74c3c', speedInfo: 1.0, turnInfo: 1.0 },
-        { id: 1, name: 'SPEED', color: '#f1c40f', speedInfo: 1.08, turnInfo: 0.85 },
-        { id: 2, name: 'TANK', color: '#3498db', speedInfo: 0.92, turnInfo: 1.15 }
+        { id: 1, name: 'Thiago', color: '#f1c40f', speedInfo: 1.08, turnInfo: 0.85 },
+        { id: 2, name: 'Thamis', color: '#3498db', speedInfo: 0.92, turnInfo: 1.15 }
     ];
 
     const TRACKS = [
