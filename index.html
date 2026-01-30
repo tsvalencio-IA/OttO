@@ -19,140 +19,121 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;700&family=Russo+One&family=Roboto:wght@300;400;700&display=swap');
 
-        :root {
-            --wii-bg: #e0e0e0;
-            --wii-glass: rgba(255, 255, 255, 0.85);
-            --wii-border: #c0c0c0;
-            --wii-blue: #72d7ee;
-            --wii-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        }
-
         body { 
-            background: radial-gradient(circle at center, #ffffff 30%, #cdcdcd 100%);
+            background: #e0e0e0;
             margin: 0; overflow: hidden; 
             font-family: 'Roboto', sans-serif; 
             user-select: none; touch-action: none;
             height: 100vh; width: 100vw;
+            display: flex; flex-direction: column; align-items: center;
         }
 
-        /* Efeito de TV Antiga (Scanlines sutis) */
+        /* Scanlines Sutis (TV de Tubo) */
         .crt-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             pointer-events: none; z-index: 999;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.02) 50%);
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.05) 50%);
             background-size: 100% 4px;
         }
 
         #webcam { 
-            position: absolute; bottom: 85px; right: 25px; width: 140px; 
+            position: absolute; bottom: 90px; right: 30px; width: 160px; 
             border-radius: 12px; border: 4px solid white; 
-            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
             transform: scaleX(-1); z-index: 50; opacity: 0; transition: opacity 0.5s;
         }
 
         #game-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; }
 
-        /* --- CONTAINER PRINCIPAL WII --- */
+        /* --- MENU WII CLASSICO --- */
         .wii-menu {
-            display: flex; flex-direction: column; align-items: center; justify-content: space-between;
-            height: 100%; width: 100%; position: relative; z-index: 20;
-            padding-top: 2vh; padding-bottom: 2vh;
+            width: 100%; height: 100%;
+            display: flex; flex-direction: column; 
+            align-items: center; justify-content: center;
+            z-index: 20; background: linear-gradient(to bottom, #fff 0%, #dcdcdc 100%);
         }
 
-        /* HEADER */
-        .wii-header {
-            width: 85%; display: flex; justify-content: center; align-items: center;
-            color: #999; font-size: 1.1rem; font-weight: 300; 
-            padding-bottom: 10px; border-bottom: 1px solid #ccc;
-            text-transform: uppercase; letter-spacing: 2px;
-        }
-
-        /* GRID DE CANAIS */
         .channel-grid {
             display: grid; 
             grid-template-columns: repeat(4, 1fr); 
             grid-template-rows: repeat(3, 1fr);
-            gap: 1.5vh;
-            width: 85%; height: 70%;
-            max-width: 1200px;
+            gap: 15px;
+            width: 90%; max-width: 1200px;
+            height: 75%; /* Ocupa a maior parte da tela */
+            padding: 20px;
         }
 
         .channel {
             background: white;
-            border-radius: 12px;
-            border: 1px solid #ccc;
-            box-shadow: 3px 3px 10px rgba(0,0,0,0.05), inset 0 0 20px rgba(230,230,230,0.5);
+            border-radius: 20px; /* Bordas bem arredondadas estilo Wii */
+            border: 4px solid #f0f0f0; /* Borda grossa suave */
+            box-shadow: 5px 5px 10px rgba(0,0,0,0.1), inset 0 0 15px rgba(0,0,0,0.05);
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             cursor: pointer; position: relative; overflow: hidden;
-            transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+            aspect-ratio: 16/9; /* Mantém o formato retangular da TV */
         }
 
         .channel:hover {
             transform: scale(1.05);
-            border-color: var(--wii-blue);
-            box-shadow: 0 0 0 4px rgba(114, 215, 238, 0.4), 0 10px 20px rgba(0,0,0,0.15);
-            z-index: 10;
+            border-color: #72d7ee; /* Azul Wii */
+            box-shadow: 0 0 0 4px rgba(114, 215, 238, 0.5), 0 15px 25px rgba(0,0,0,0.2);
+            z-index: 100;
         }
 
-        /* Conteúdo do Canal */
-        .channel-content {
-            display: flex; flex-direction: column; align-items: center; text-align: center;
-            width: 100%; height: 100%; justify-content: center;
+        .channel-icon { 
+            font-size: 4rem; 
+            filter: drop-shadow(0 4px 2px rgba(0,0,0,0.1));
+            transition: transform 0.3s;
         }
         
-        .channel-icon { font-size: 3.5rem; margin-bottom: 5px; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.1)); }
-        
+        .channel:hover .channel-icon { transform: scale(1.1) rotate(5deg); }
+
         .channel-title { 
             font-family: 'Chakra Petch', sans-serif; 
-            font-size: 0.85rem; color: #555; 
-            font-weight: 700; text-transform: uppercase; 
-            width: 90%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            font-size: 1rem; color: #888; margin-top: 10px;
+            font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
         }
 
-        /* BARRA INFERIOR (OVAL CLASSICA) */
-        .wii-footer-bar {
-            width: 90%; max-width: 1000px; height: 70px;
-            background: #dcdcdc;
-            border-radius: 35px;
-            border: 1px solid #bbb;
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 0 30px;
-            box-shadow: inset 0 2px 5px rgba(0,0,0,0.05), 0 5px 15px rgba(0,0,0,0.1);
+        /* BARRA INFERIOR OVAL GRANDE */
+        .wii-footer-container {
+            width: 100%; height: 15%;
+            display: flex; justify-content: center; align-items: flex-start;
+            background: linear-gradient(to bottom, #dcdcdc, #b0b0b0);
+            border-top: 2px solid #aaa;
         }
 
-        .wii-btn-circle {
-            width: 50px; height: 50px;
-            background: radial-gradient(circle at 30% 30%, #fff, #ddd);
-            border-radius: 50%; border: 1px solid #aaa;
+        .wii-oval-btn {
+            background: radial-gradient(circle at 30% 30%, #fff, #e0e0e0);
+            border-radius: 50%; width: 60px; height: 60px;
             display: flex; align-items: center; justify-content: center;
-            font-weight: bold; color: #666; font-size: 1rem;
-            cursor: pointer; box-shadow: 0 3px 5px rgba(0,0,0,0.15);
+            font-weight: bold; color: #888; font-size: 1.2rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            border: 2px solid #ccc; cursor: pointer; margin: 0 20px;
             transition: transform 0.1s;
         }
-        .wii-btn-circle:active { transform: scale(0.95); box-shadow: inset 0 2px 5px rgba(0,0,0,0.2); }
+        .wii-oval-btn:active { transform: scale(0.9); }
 
         .wii-clock {
-            font-family: 'Roboto', sans-serif; font-weight: 300; font-size: 1.8rem; color: #777;
-            text-shadow: 1px 1px 0 #fff;
+            font-size: 2.5rem; color: #666; font-weight: 300;
+            text-shadow: 1px 1px 0 #fff; margin: 0 40px;
         }
 
-        /* TELAS DE JOGO E LOADING */
+        /* TELAS EXTRAS */
         #loading { 
             background: #fff; z-index: 1000; position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             display: flex; align-items: center; justify-content: center; flex-direction: column;
         }
-        
         .hidden { display: none !important; }
 
-        /* UI DO JOGO (HUD) */
-        #game-ui { pointer-events: none; } /* Deixa cliques passarem para o canvas se necessário */
-        #game-ui > * { pointer-events: auto; } /* Reativa cliques nos botões */
+        #game-ui { pointer-events: none; } 
+        #game-ui > * { pointer-events: auto; }
 
         #game-msg {
             font-family: 'Russo One'; font-size: 5rem; color: #fff;
             text-shadow: 0 4px 0 #000, 0 0 20px rgba(0,0,0,0.5);
             position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            opacity: 0; transition: opacity 0.3s; width: 100%; text-align: center;
+            opacity: 0; transition: opacity 0.3s; width: 100%; text-align: center; pointer-events: none;
         }
     </style>
 </head>
@@ -162,62 +143,64 @@
     <div class="crt-overlay"></div>
     <canvas id="game-canvas"></canvas>
 
-    <!-- TELA DE LOADING -->
+    <!-- LOADING -->
     <div id="loading">
-        <div class="w-16 h-16 border-4 border-gray-300 border-t-blue-400 rounded-full animate-spin"></div>
-        <p class="mt-6 text-gray-400 font-bold tracking-widest text-sm">INICIANDO THIAGUINHO WII...</p>
+        <div class="w-20 h-20 border-8 border-gray-200 border-t-blue-400 rounded-full animate-spin"></div>
+        <p class="mt-8 text-gray-400 font-bold tracking-widest text-lg">LIGANDO THIAGUINHO WII...</p>
     </div>
 
     <!-- MENU PRINCIPAL -->
     <div id="menu-screen" class="wii-menu hidden">
-        <div class="wii-header">
-            thIAguinho Wii Menu
+        <div style="width:100%; text-align:center; padding-top:10px; color:#aaa; font-size:0.9rem; letter-spacing:2px;">
+            TOUCH START TO BEGIN
         </div>
 
         <div class="channel-grid" id="channel-grid">
-            <!-- Os canais serão injetados via JavaScript -->
-            <!-- Placeholder para manter o grid bonito mesmo vazio -->
-            <div class="channel" style="opacity: 0.5; pointer-events: none;"><div class="channel-content"></div></div>
-            <div class="channel" style="opacity: 0.5; pointer-events: none;"><div class="channel-content"></div></div>
-            <div class="channel" style="opacity: 0.5; pointer-events: none;"><div class="channel-content"></div></div>
-            <div class="channel" style="opacity: 0.5; pointer-events: none;"><div class="channel-content"></div></div>
+            <!-- JS injeta os jogos aqui -->
+            <!-- Canais Vazios para estética -->
+            <div class="channel" style="opacity: 0.6; pointer-events: none; background:#f4f4f4;"></div>
+            <div class="channel" style="opacity: 0.6; pointer-events: none; background:#f4f4f4;"></div>
+            <div class="channel" style="opacity: 0.6; pointer-events: none; background:#f4f4f4;"></div>
+            <div class="channel" style="opacity: 0.6; pointer-events: none; background:#f4f4f4;"></div>
         </div>
 
-        <div class="wii-footer-bar">
-            <div class="wii-btn-circle" onclick="window.System.msg('PERFIL')" style="font-size: 0.7rem; color:#888;">Wii</div>
-            <div class="wii-clock" id="clock">12:00</div>
-            <div class="wii-btn-circle" onclick="location.reload()" title="Reiniciar">↻</div>
+        <div class="wii-footer-container">
+            <div style="display:flex; align-items:center; margin-top: 15px;">
+                <div class="wii-oval-btn" onclick="window.System.msg('OPÇÕES')">Wii</div>
+                <div class="wii-clock" id="clock">12:00</div>
+                <div class="wii-oval-btn" onclick="location.reload()" title="Reiniciar">↻</div>
+            </div>
         </div>
         
-        <div style="position: absolute; bottom: 85px; right: 50px; font-size: 0.7rem; color: #aaa; font-weight: bold;">
+        <div style="position: absolute; bottom: 20px; right: 20px; font-size: 0.8rem; color: #999; font-weight: bold;">
             REDE: <span id="net-status" style="color: #ccc;">OFFLINE</span>
         </div>
     </div>
 
-    <!-- HUD DURANTE O JOGO -->
+    <!-- HUD -->
     <div id="game-ui" class="hidden">
-        <div style="position: fixed; top: 25px; left: 25px; background: rgba(0,0,0,0.6); padding: 8px 25px; border-radius: 20px; border: 2px solid rgba(255,255,255,0.2); backdrop-filter: blur(4px);">
-            <span style="color: #aaa; font-size: 0.8rem; font-weight: bold; margin-right: 5px;">PONTOS</span>
-            <span id="hud-score" style="color: #fff; font-family: 'Russo One'; font-size: 1.5rem;">0</span>
+        <div style="position: fixed; top: 25px; left: 25px; background: rgba(0,0,0,0.6); padding: 8px 25px; border-radius: 30px; border: 2px solid rgba(255,255,255,0.3); backdrop-filter: blur(4px);">
+            <span style="color: #aaa; font-size: 0.9rem; font-weight: bold; margin-right: 5px;">SCORE</span>
+            <span id="hud-score" style="color: #fff; font-family: 'Russo One'; font-size: 1.8rem;">0</span>
         </div>
         
         <div id="game-msg"></div>
 
         <button onclick="window.System.home()" 
-                style="position: fixed; top: 25px; right: 25px; width: 50px; height: 50px; background: white; border-radius: 50%; border: none; font-size: 1.5rem; color: #555; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.1s;">
+                style="position: fixed; top: 25px; right: 25px; width: 60px; height: 60px; background: white; border-radius: 50%; border: 4px solid #ddd; font-size: 1.8rem; color: #555; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.1s;">
             🏠
         </button>
     </div>
 
-    <!-- TELA DE GAME OVER -->
-    <div id="screen-over" class="wii-menu hidden" style="background: rgba(0,0,0,0.92); color: white; justify-content: center;">
-        <h1 style="font-family: 'Russo One'; font-size: 4rem; color: #ff5252; margin-bottom: 10px;">FIM DE JOGO</h1>
-        <div style="background: #333; padding: 20px 50px; border-radius: 15px; text-align: center; border: 2px solid #555;">
-            <p style="color: #aaa; font-size: 0.9rem; letter-spacing: 1px;">PONTUAÇÃO FINAL</p>
-            <span id="final-score" style="font-family: 'Russo One'; font-size: 3.5rem; color: #ffd740;">0</span>
+    <!-- GAME OVER -->
+    <div id="screen-over" class="wii-menu hidden" style="background: rgba(0,0,0,0.95); z-index:200;">
+        <h1 style="font-family: 'Russo One'; font-size: 5rem; color: #ff5252; margin-bottom: 10px; text-shadow: 0 0 20px red;">FIM DE JOGO</h1>
+        <div style="background: #222; padding: 30px 60px; border-radius: 20px; text-align: center; border: 3px solid #444;">
+            <p style="color: #aaa; font-size: 1rem; letter-spacing: 2px; margin-bottom:10px;">PONTUAÇÃO FINAL</p>
+            <span id="final-score" style="font-family: 'Russo One'; font-size: 4.5rem; color: #ffd740;">0</span>
         </div>
         <button onclick="window.System.home()" 
-                style="margin-top: 40px; padding: 15px 60px; background: white; border: none; border-radius: 30px; font-weight: bold; font-size: 1.2rem; color: #333; cursor: pointer; box-shadow: 0 0 20px rgba(255,255,255,0.2);">
+                style="margin-top: 50px; padding: 15px 50px; background: #fff; border: none; border-radius: 40px; font-weight: bold; font-size: 1.3rem; color: #333; cursor: pointer; box-shadow: 0 0 30px rgba(255,255,255,0.3); transition: transform 0.2s;">
             VOLTAR AO MENU
         </button>
     </div>
@@ -233,7 +216,6 @@
             messagingSenderId: "63695043126",
             appId: "1:63695043126:web:abd6a8ba7792313991b697"
         };
-
         try {
             if (typeof firebase !== 'undefined') {
                 firebase.initializeApp(firebaseConfig);
@@ -245,8 +227,7 @@
         } catch (e) { console.error("Firebase Falhou:", e); }
     </script>
 
-    <!-- CARREGAMENTO DOS SCRIPTS -->
-    <!-- Ordem Crítica: Core primeiro, depois os jogos -->
+    <!-- SCRIPTS -->
     <script src="js/core.js"></script>
     <script src="js/game_kart.js"></script>
     <script src="js/game_run.js"></script>
@@ -254,7 +235,6 @@
     <script src="js/game_tennis.js"></script>
 
     <script>
-        // Relógio do Sistema
         setInterval(() => {
             const now = new Date();
             const el = document.getElementById('clock');
