@@ -16,21 +16,21 @@
         // Definição Visual dos Personagens
         CHARS: {
             'luigi': { 
-                name: 'LUIGI', 
+                name: 'Otto', 
                 color: '#40a832', // Verde
                 skin: '#ffccaa', 
                 hat: '#40a832', 
                 gloves: '#ffffff' 
             },
             'mario': { 
-                name: 'MARIO', 
+                name: 'Thiago', 
                 color: '#ff0000', // Vermelho
                 skin: '#ffccaa', 
                 hat: '#ff0000', 
                 gloves: '#ffffff' 
             },
             'peach': { 
-                name: 'PEACH', 
+                name: 'Thamis', 
                 color: '#ff69b4', // Rosa
                 skin: '#ffe5b4', 
                 hat: '#ffd700',   // Coroa Dourada
