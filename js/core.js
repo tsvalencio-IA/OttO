@@ -1,8 +1,8 @@
 /* =================================================================
-   CORE DO SISTEMA (CÉREBRO) - OTIMIZADO (V2)
+   CORE DO SISTEMA (CÉREBRO) - VERSÃO ULTIMATE (MULTIPLAYER READY)
    ================================================================= */
 
-// 1. AUDIO GLOBAL
+// 1. SISTEMA DE ÁUDIO GLOBAL
 window.Sfx = {
     ctx: null,
     init: () => { 
@@ -22,10 +22,13 @@ window.Sfx = {
             o.start(); o.stop(window.Sfx.ctx.currentTime+d);
         } catch(e) { console.warn("Audio Error", e); }
     },
+    // Sons Padrão do Sistema
     hover: () => window.Sfx.play(800, 'sine', 0.05, 0.05),
     click: () => window.Sfx.play(1200, 'sine', 0.1, 0.1),
     crash: () => window.Sfx.play(100, 'sawtooth', 0.5, 0.2),
-    skid: () => window.Sfx.play(150, 'square', 0.1, 0.05)
+    skid: () => window.Sfx.play(150, 'square', 0.1, 0.05),
+    hit: () => window.Sfx.play(300, 'square', 0.05, 0.1),
+    coin: () => window.Sfx.play(1200, 'sine', 0.1, 0.1)
 };
 
 // 2. SISTEMA GRÁFICO AUXILIAR
@@ -39,36 +42,36 @@ window.Gfx = {
         }
     },
     shakeScreen: (i) => { window.Gfx.shake = i; },
-    // Mapeamento correto com espelhamento horizontal para sensação natural
-    map: (pt, w, h) => ({ x: (1 - pt.x) * w, y: pt.y * h }),
-    drawSkeleton: (ctx, pose, w, h) => { /* Opcional: Debug visual do esqueleto */ }
+    // Mapeamento útil para converter coordenadas normalizadas (0-1) para tela
+    map: (pt, w, h) => ({ x: (1 - pt.x) * w, y: pt.y * h })
 };
 
-// 3. SISTEMA PRINCIPAL
+// 3. SISTEMA PRINCIPAL (GAME ENGINE)
 window.System = {
     video: null, canvas: null, detector: null,
     games: [], activeGame: null, loopId: null,
-    playerId: null,
+    playerId: null, // Identidade Única para Multiplayer
 
     init: async () => {
-        console.log("Iniciando System Wii (V2 - Otimizado)...");
+        console.log("Iniciando System Wii...");
         const loadingText = document.getElementById('loading-text');
 
-        // Identidade do Jogador
+        // --- GERAÇÃO DE ID ÚNICO DO JOGADOR ---
         let savedId = localStorage.getItem('wii_player_id');
         if (!savedId) {
-            savedId = 'Player_' + Math.floor(Math.random() * 9999);
+            savedId = 'Player_' + Math.floor(Math.random() * 99999);
             localStorage.setItem('wii_player_id', savedId);
         }
         window.System.playerId = savedId;
-        console.log("Identidade:", window.System.playerId);
+        console.log("Identidade Multiplayer:", window.System.playerId);
 
         try {
+            // Setup Canvas
             window.System.canvas = document.getElementById('game-canvas');
             window.System.resize();
             window.addEventListener('resize', window.System.resize);
 
-            // 1. Câmera
+            // Setup Câmera
             if (loadingText) loadingText.innerText = "LIGANDO CÂMERA...";
             window.System.video = document.getElementById('webcam');
             
@@ -80,11 +83,11 @@ window.System = {
                 await new Promise(r => window.System.video.onloadedmetadata = r);
                 window.System.video.play();
             } catch(e) {
-                console.warn("Câmera falhou:", e);
-                if (loadingText) loadingText.innerText = "SEM CÂMERA (MODO TOQUE)...";
+                console.warn("Câmera falhou ou negada:", e);
+                if (loadingText) loadingText.innerText = "CÂMERA NÃO DETECTADA...";
             }
 
-            // 2. IA (MoveNet) - Com Timeout de segurança
+            // Setup TensorFlow (IA)
             if (typeof poseDetection !== 'undefined') {
                 if (loadingText) loadingText.innerText = "CARREGANDO INTELIGÊNCIA ARTIFICIAL...";
                 
@@ -93,35 +96,45 @@ window.System = {
                     { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
                 );
                 
+                // Timeout de segurança caso a IA demore demais
                 const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Timeout IA')), 8000)
+                    setTimeout(() => reject(new Error('Tempo limite da IA excedido')), 10000)
                 );
 
                 try {
                     window.System.detector = await Promise.race([modelPromise, timeoutPromise]);
-                    console.log("IA Carregada!");
+                    console.log("IA Carregada com sucesso!");
                 } catch (err) {
-                    console.error("Falha ao carregar IA:", err);
-                    if (loadingText) loadingText.innerText = "IA LENTA. MODO TOQUE ATIVO.";
+                    console.error("Falha ao carregar IA (Rede lenta ou erro):", err);
+                    if (loadingText) loadingText.innerText = "IA FALHOU. MODO TOQUE ATIVO.";
+                    // Espera um pouco para o usuário ler a mensagem
+                    await new Promise(r => setTimeout(r, 1500));
                 }
+            } else {
+                console.warn("Biblioteca TensorFlow não carregada.");
             }
 
         } catch (globalErr) {
-            console.error("Erro fatal:", globalErr);
+            console.error("Erro fatal na inicialização:", globalErr);
+            alert("Erro ao iniciar sistema. Verifique permissões de câmera.");
         } finally {
+            // Remove tela de loading e abre o menu
             const loadScreen = document.getElementById('loading');
             if (loadScreen) loadScreen.classList.add('hidden');
             window.System.menu();
             
-            // Ativa audio no primeiro clique
+            // Inicializa áudio no primeiro toque (exigência de navegadores modernos)
             document.body.addEventListener('click', () => window.Sfx.init(), {once:true});
             document.body.addEventListener('touchstart', () => window.Sfx.init(), {once:true});
         }
     },
 
+    // Registra um jogo no Menu Principal
     registerGame: (id, title, icon, logic, opts) => {
         if(!window.System.games.find(g => g.id === id)) {
             window.System.games.push({ id, title, icon, logic, opts });
+            
+            // Adiciona ícone no Grid HTML
             const grid = document.getElementById('channel-grid');
             if (grid) {
                 const div = document.createElement('div');
@@ -134,6 +147,7 @@ window.System = {
         }
     },
 
+    // Volta para o Menu
     menu: () => {
         window.System.stopGame();
         const menu = document.getElementById('menu-screen');
@@ -144,8 +158,9 @@ window.System = {
         if(menu) menu.classList.remove('hidden');
         if(ui) ui.classList.add('hidden');
         if(over) over.classList.add('hidden');
-        if(web) web.style.opacity = 0;
+        if(web) web.style.opacity = 0; // Esconde câmera no menu
         
+        // Limpa o canvas
         if (window.System.canvas) {
             const ctx = window.System.canvas.getContext('2d');
             ctx.fillStyle = "#ececec";
@@ -153,6 +168,7 @@ window.System = {
         }
     },
 
+    // Carrega um Jogo Específico
     loadGame: (id) => {
         const game = window.System.games.find(g => g.id === id);
         if(!game) return;
@@ -161,19 +177,22 @@ window.System = {
         document.getElementById('menu-screen').classList.add('hidden');
         document.getElementById('game-ui').classList.remove('hidden');
         
+        // Mostra câmera (se o jogo pedir)
         if (window.System.video && window.System.video.readyState >= 2) {
             document.getElementById('webcam').style.opacity = game.opts.camOpacity || 0.3;
         }
 
+        // Inicia a lógica do jogo
         if (game.logic.init) game.logic.init();
         window.Sfx.click();
-        window.System.loop();
+        window.System.loop(); // Inicia o loop de renderização
     },
 
+    // Loop Principal (60 FPS)
     loop: async () => {
         if(!window.System.activeGame) return;
 
-        // Se já tiver loop rodando, cancela o anterior para evitar duplicação
+        // Cancela loop anterior se houver (evita duplicação)
         if (window.System.loopId) {
             cancelAnimationFrame(window.System.loopId);
             window.System.loopId = null;
@@ -183,26 +202,31 @@ window.System = {
         const w = window.System.canvas.width;
         const h = window.System.canvas.height;
 
+        // Detecção de Pose (se disponível)
         let pose = null;
         if (window.System.detector && window.System.video && window.System.video.readyState === 4) {
             try {
+                // flipHorizontal: false pois tratamos espelhamento manualmente na lógica
                 const p = await window.System.detector.estimatePoses(window.System.video, {flipHorizontal: false});
                 if(p.length > 0) pose = p[0];
-            } catch(e) { /* Silencioso */ }
+            } catch(e) { /* Silencioso para não spammar console */ }
         }
 
         ctx.save();
         if(window.Gfx && window.Gfx.updateShake) window.Gfx.updateShake(ctx);
         
+        // Executa lógica do jogo atual
         const s = window.System.activeGame.logic.update(ctx, w, h, pose);
         ctx.restore();
 
+        // Atualiza Score na UI
         const scoreEl = document.getElementById('hud-score');
         if(typeof s === 'number' && scoreEl) scoreEl.innerText = Math.floor(s);
 
         window.System.loopId = requestAnimationFrame(window.System.loop);
     },
 
+    // Encerra o jogo atual
     stopGame: () => {
         if (window.System.activeGame && window.System.activeGame.logic.cleanup) {
             window.System.activeGame.logic.cleanup();
@@ -216,6 +240,7 @@ window.System = {
 
     home: () => { window.Sfx.click(); window.System.menu(); },
     
+    // Tela de Fim de Jogo
     gameOver: (s) => {
         window.System.stopGame();
         window.Sfx.crash();
@@ -225,6 +250,7 @@ window.System = {
         document.getElementById('screen-over').classList.remove('hidden');
     },
 
+    // Ajusta tamanho da tela
     resize: () => {
         if(window.System.canvas) {
             window.System.canvas.width = window.innerWidth;
@@ -232,6 +258,7 @@ window.System = {
         }
     },
 
+    // Mensagens na tela (ex: "TURBO!", "VAI!")
     msg: (t) => {
         const el = document.getElementById('game-msg');
         if(el) {
@@ -241,4 +268,5 @@ window.System = {
     }
 };
 
+// Inicia tudo quando a página carregar
 window.onload = window.System.init;
