@@ -1,123 +1,230 @@
-/* =================================================================
-   LÓGICA DO JOGO: OTTO BOXING (AVATAR MII COMPLETO)
-   ================================================================= */
+// =============================================================================
+// LÓGICA DO JOGO: OTTO BOXING (LUIGI'S GYM WII EDITION)
+// ARQUITETO: SENIOR DEV V3 (RESTAURAÇÃO DE CENÁRIO E AVATAR)
+// =============================================================================
 
 (function() {
-    let tg = []; let lastSpawn = 0; let sc = 0;
-    const CONF = { GLOVE_SIZE: 45, DURATION: 120 };
+    let tg = [], lastSpawn = 0;
+    const CONF = { DURATION: 120, TARGET_RATE: 850, COLOR_LUIGI: '#40a832' };
 
     const Logic = {
-        state: 'MODE_SELECT',
-        player: { head: {x:0,y:0}, wrists: {l:{x:0,y:0}, r:{x:0,y:0}}, shoulders: {l:{x:0,y:0}, r:{x:0,y:0}} },
-        rivals: [], isOnline: false,
+        sc: 0, 
+        state: 'MODE_SELECT', 
+        timeLeft: 120, 
+        startTime: 0,
+        // Estrutura do Jogador
+        player: { 
+            head: {x:0, y:0}, 
+            wrists: {l:{x:0,y:0}, r:{x:0,y:0}}, 
+            shoulders: {l:{x:0,y:0}, r:{x:0,y:0}} 
+        },
+        rivals: [], 
+        isOnline: false, 
+        dbRef: null,
 
-        init: function() {
-            sc = 0; tg = []; this.state = 'MODE_SELECT';
+        init: function() { 
+            this.sc = 0; 
+            tg = []; 
+            this.state = 'MODE_SELECT'; 
+            window.System.msg("SELECIONE O MODO");
+        },
+
+        selectMode: function(mode) {
+            this.state = 'play'; 
+            this.startTime = Date.now();
+            if(mode === 'ONLINE') {
+                this.isOnline = true; 
+                this.connectMultiplayer();
+                window.System.msg("A CONECTAR...");
+            } else {
+                window.System.msg("LUIGI TIME!");
+            }
+        },
+
+        connectMultiplayer: function() {
+            this.dbRef = window.DB.ref('rooms/box_01');
+            this.dbRef.child('players/' + window.System.playerId).onDisconnect().remove();
+            this.dbRef.child('players').on('value', snap => {
+                const data = snap.val(); 
+                if(!data) return;
+                this.rivals = Object.keys(data)
+                    .filter(id => id !== window.System.playerId)
+                    .map(id => ({ id, ...data[id] }));
+            });
         },
 
         update: function(ctx, w, h, pose) {
-            if(this.state === 'MODE_SELECT') {
-                this.drawModeMenu(ctx, w, h);
-                return 0;
+            if(this.state === 'MODE_SELECT') { 
+                this.drawMenu(ctx, w, h); 
+                return 0; 
             }
 
-            // Background Ringue
-            ctx.fillStyle = '#111'; ctx.fillRect(0,0,w,h);
-            ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
-            for(let i=0; i<w; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,h); ctx.stroke(); }
+            // --- 1. RENDERIZAÇÃO DO CENÁRIO (RINGUE) ---
+            this.drawScenery(ctx, w, h);
 
+            // --- 2. PROCESSAMENTO DE MOVIMENTO ---
             if(pose) {
                 const map = window.Gfx.map;
-                const n = pose.keypoints.find(k => k.name === 'nose');
-                const lw = pose.keypoints.find(k => k.name === 'left_wrist');
-                const rw = pose.keypoints.find(k => k.name === 'right_wrist');
-                const ls = pose.keypoints.find(k => k.name === 'left_shoulder');
-                const rs = pose.keypoints.find(k => k.name === 'right_shoulder');
+                const kp = pose.keypoints;
+                const get = (name) => { 
+                    const k = kp.find(p => p.name === name); 
+                    return (k && k.score > 0.3) ? map(k, w, h) : null; 
+                };
                 
-                if(n && n.score > 0.3) this.player.head = map(n, w, h);
-                if(lw && lw.score > 0.3) this.player.wrists.l = map(lw, w, h);
-                if(rw && rw.score > 0.3) this.player.wrists.r = map(rw, w, h);
-                if(ls && ls.score > 0.3) this.player.shoulders.l = map(ls, w, h);
-                if(rs && rs.score > 0.3) this.player.shoulders.r = map(rs, w, h);
+                const n = get('nose'); 
+                const lw = get('left_wrist'); 
+                const rw = get('right_wrist');
+                const ls = get('left_shoulder'); 
+                const rs = get('right_shoulder');
+
+                if(n) this.player.head = n;
+                if(lw) this.player.wrists.l = lw; 
+                if(rw) this.player.wrists.r = rw;
+                if(ls) this.player.shoulders.l = ls; 
+                if(rs) this.player.shoulders.r = rs;
             }
 
-            // Desenha Avatar do Jogador (Mii Style)
-            this.drawAvatar(ctx, this.player, '#4caf50', w);
+            // --- 3. RENDERIZAÇÃO DE JOGADORES ---
+            // Rivais (Fantasmas)
+            this.rivals.forEach(r => {
+                ctx.save(); 
+                ctx.globalAlpha = 0.3;
+                this.drawLuigi(ctx, r, '#ff5555', w);
+                ctx.restore();
+            });
 
-            // Alvos
-            if(Date.now() - lastSpawn > 800) {
-                tg.push({ x: w*0.2 + Math.random()*w*0.6, y: h*0.2 + Math.random()*h*0.4, r: 50, life: 100 });
-                lastSpawn = Date.now();
+            // Luigi (Jogador Atual)
+            this.drawLuigi(ctx, this.player, CONF.COLOR_LUIGI, w);
+
+            // --- 4. LÓGICA DE ALVOS (TREINO) ---
+            const now = Date.now();
+            if(now - lastSpawn > CONF.TARGET_RATE) {
+                tg.push({ 
+                    x: w*0.2 + Math.random()*w*0.6, 
+                    y: h*0.2 + Math.random()*h*0.4, 
+                    r: 50, 
+                    life: 100 
+                });
+                lastSpawn = now;
             }
 
-            for(let i=tg.length-1; i>=0; i--) {
-                let t = tg[i]; t.life--;
-                if(t.life <= 0) { tg.splice(i,1); continue; }
+            for(let i = tg.length - 1; i >= 0; i--) {
+                let t = tg[i]; 
+                t.life--;
+                if(t.life <= 0) { tg.splice(i, 1); continue; }
                 
-                ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI*2);
-                ctx.fillStyle = 'rgba(255, 152, 0, 0.8)'; ctx.fill();
-                ctx.strokeStyle = 'white'; ctx.lineWidth = 4; ctx.stroke();
+                // Desenha Alvo estilo Wii Boxing
+                ctx.fillStyle = '#ff9800'; 
+                ctx.beginPath(); 
+                ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2); 
+                ctx.fill();
+                ctx.strokeStyle = 'white'; 
+                ctx.lineWidth = 5; 
+                ctx.stroke();
 
-                // Colisão com Luvas
-                [this.player.wrists.l, this.player.wrists.r].forEach(p => {
-                    if(Math.hypot(p.x - t.x, p.y - t.y) < t.r + CONF.GLOVE_SIZE) {
-                        sc += 50; window.Sfx.hit(); tg.splice(i,1);
+                // Colisão com as Luvas
+                [this.player.wrists.l, this.player.wrists.r].forEach(wr => {
+                    if(wr.x && Math.hypot(wr.x - t.x, wr.y - t.y) < t.r + 40) {
+                        this.sc += 50; 
+                        window.Sfx.hit(); 
+                        tg.splice(i, 1);
                     }
                 });
             }
 
-            return sc;
+            // Sincronização Online
+            if(this.isOnline && now % 5 === 0) {
+                this.dbRef.child('players/' + window.System.playerId).update({
+                    head: this.player.head, 
+                    wrists: this.player.wrists, 
+                    sc: this.sc, 
+                    lastSeen: firebase.database.ServerValue.TIMESTAMP
+                });
+            }
+
+            return this.sc;
         },
 
-        drawAvatar: function(ctx, p, color, w) {
-            if(!p.head.x) return;
+        drawScenery: function(ctx, w, h) {
+            ctx.fillStyle = '#1a1a1a'; 
+            ctx.fillRect(0, 0, w, h);
+            
+            // Cordas do Ringue (Perspectiva)
+            ctx.strokeStyle = '#f44336'; ctx.lineWidth = 12; // Corda Superior
+            ctx.beginPath(); ctx.moveTo(0, h * 0.4); ctx.lineTo(w, h * 0.4); ctx.stroke();
+            
+            ctx.strokeStyle = '#2196f3'; ctx.lineWidth = 12; // Corda Inferior
+            ctx.beginPath(); ctx.moveTo(0, h * 0.6); ctx.lineTo(w, h * 0.6); ctx.stroke();
+            
+            // Tapete do Ringue com Degradê
+            const grad = ctx.createLinearGradient(0, h * 0.6, 0, h);
+            grad.addColorStop(0, '#2c3e50'); 
+            grad.addColorStop(1, '#111111');
+            ctx.fillStyle = grad; 
+            ctx.fillRect(0, h * 0.6, w, h * 0.4);
+        },
+
+        drawLuigi: function(ctx, p, color, w) {
+            if(!p.head || !p.head.x) return;
             const s = w * 0.005;
-
-            // Corpo
-            const cx = (p.shoulders.l.x + p.shoulders.r.x) / 2 || p.head.x;
-            const cy = (p.shoulders.l.y + p.shoulders.r.y) / 2 || p.head.y + 100;
             
+            // 1. Corpo (Macacão)
             ctx.fillStyle = color;
-            ctx.beginPath(); ctx.ellipse(cx, cy + 50, 60, 100, 0, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); 
+            ctx.ellipse(p.head.x, p.head.y + 120, 55, 90, 0, 0, Math.PI * 2); 
+            ctx.fill();
             
-            // Cabeça
-            ctx.fillStyle = '#ffccaa';
-            ctx.beginPath(); ctx.arc(p.head.x, p.head.y, 45, 0, Math.PI*2); ctx.fill();
-
-            // Luvas
-            [p.wrists.l, p.wrists.r].forEach((wr, i) => {
-                if(!wr.x) return;
+            // 2. Cabeça
+            ctx.fillStyle = '#ffccaa'; // Pele
+            ctx.beginPath(); 
+            ctx.arc(p.head.x, p.head.y, 45, 0, Math.PI * 2); 
+            ctx.fill();
+            
+            // 3. Boné
+            ctx.fillStyle = color;
+            ctx.beginPath(); 
+            ctx.arc(p.head.x, p.head.y - 12, 50, Math.PI, 0); 
+            ctx.fill();
+            
+            // 4. Luvas (Wrists detetados)
+            [p.wrists.l, p.wrists.r].forEach(wr => {
+                if(!wr || !wr.x) return;
                 ctx.fillStyle = 'white';
-                ctx.beginPath(); ctx.arc(wr.x, wr.y, CONF.GLOVE_SIZE, 0, Math.PI*2); ctx.fill();
-                ctx.strokeStyle = '#ddd'; ctx.lineWidth = 3; ctx.stroke();
+                ctx.beginPath(); 
+                ctx.arc(wr.x, wr.y, 42, 0, Math.PI * 2); 
+                ctx.fill();
+                ctx.strokeStyle = '#dddddd'; 
+                ctx.lineWidth = 3; 
+                ctx.stroke();
             });
         },
 
-        drawModeMenu: function(ctx, w, h) {
-            ctx.fillStyle = '#222'; ctx.fillRect(0,0,w,h);
-            ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.font = "bold 40px 'Russo One'";
-            ctx.fillText("BOXE: ESCOLHA O MODO", w/2, h*0.3);
+        drawMenu: function(ctx, w, h) {
+            ctx.fillStyle = '#111111'; 
+            ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = '#ffffff'; 
+            ctx.textAlign = 'center'; 
+            ctx.font = "bold 35px 'Russo One'";
+            ctx.fillText("BOXE LUIGI: SELECIONE O MODO", w / 2, h / 2 - 40);
             
-            const drawBtn = (x, y, txt, c) => {
-                ctx.fillStyle = c; ctx.fillRect(x - 200, y, 400, 80);
-                ctx.fillStyle = 'white'; ctx.font = "bold 25px sans-serif";
-                ctx.fillText(txt, x, y + 50);
-            };
-
-            drawBtn(w/2, h*0.45, "SOLO (OFFLINE)", "#e67e22");
-            drawBtn(w/2, h*0.60, "VERSUS (ONLINE)", "#27ae60");
-
+            ctx.font = "22px sans-serif";
+            ctx.fillText("ESQUERDA: SOLO | DIREITA: ONLINE", w / 2, h / 2 + 20);
+            
             if(!window.System.canvas.onclick) {
                 window.System.canvas.onclick = (e) => {
                     const rect = window.System.canvas.getBoundingClientRect();
-                    const y = e.clientY - rect.top;
-                    if(y > h*0.45 && y < h*0.55) { this.state = 'play'; this.isOnline = false; window.System.msg("START!"); }
-                    if(y > h*0.60 && y < h*0.70) { this.state = 'play'; this.isOnline = true; window.System.msg("BUSCANDO RIVAL..."); }
+                    const x = e.clientX - rect.left;
+                    this.selectMode(x < w / 2 ? 'OFFLINE' : 'ONLINE');
                     window.System.canvas.onclick = null;
                 };
             }
+        },
+
+        cleanup: function() { 
+            if(this.dbRef) this.dbRef.child('players/' + window.System.playerId).remove(); 
+            window.System.canvas.onclick = null;
         }
     };
 
-    window.System.registerGame('box', 'Luigi Boxe', '🥊', Logic, {camOpacity: 0.1});
+    window.System.registerGame('box', 'Luigi Boxe', '🥊', Logic, {camOpacity: 0.15});
 })();
