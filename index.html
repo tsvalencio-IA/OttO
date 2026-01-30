@@ -19,122 +19,132 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;700&family=Russo+One&family=Roboto:wght@300;400;700&display=swap');
 
+        :root {
+            --wii-bg: #ececec;
+            --wii-blue: #58b4e8;
+            --wii-gray-text: #666;
+        }
+
         body { 
-            background: #e0e0e0;
+            background: radial-gradient(circle at center, #ffffff 0%, #e0e0e0 100%);
             margin: 0; overflow: hidden; 
             font-family: 'Roboto', sans-serif; 
             user-select: none; touch-action: none;
             height: 100vh; width: 100vw;
-            display: flex; flex-direction: column; align-items: center;
         }
 
-        /* Scanlines Sutis (TV de Tubo) */
         .crt-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            pointer-events: none; z-index: 999;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.05) 50%);
-            background-size: 100% 4px;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 999;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.02) 50%);
+            background-size: 100% 3px;
         }
 
+        /* WEBCAM */
         #webcam { 
-            position: absolute; bottom: 90px; right: 30px; width: 160px; 
-            border-radius: 12px; border: 4px solid white; 
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            position: absolute; bottom: 85px; right: 20px; width: 120px; 
+            border-radius: 12px; border: 3px solid white; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
             transform: scaleX(-1); z-index: 50; opacity: 0; transition: opacity 0.5s;
         }
 
         #game-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; }
 
-        /* --- MENU WII CLASSICO --- */
-        .wii-menu {
-            width: 100%; height: 100%;
-            display: flex; flex-direction: column; 
-            align-items: center; justify-content: center;
-            z-index: 20; background: linear-gradient(to bottom, #fff 0%, #dcdcdc 100%);
+        /* WII MENU CONTAINER */
+        .wii-container {
+            display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+            height: 100%; width: 100%; position: relative; z-index: 20; padding: 20px 0;
         }
 
+        /* HEADER */
+        .wii-header {
+            width: 90%; display: flex; justify-content: center; align-items: center;
+            border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 10px;
+        }
+        .wii-title { font-weight: bold; color: #888; font-size: 1.2rem; letter-spacing: 1px; }
+
+        /* GRID DE CANAIS (CORRIGIDO PARA NÃO ESMAGAR) */
         .channel-grid {
             display: grid; 
-            grid-template-columns: repeat(4, 1fr); 
-            grid-template-rows: repeat(3, 1fr);
+            /* Define colunas fixas ou flexíveis que mantêm proporção */
+            grid-template-columns: repeat(2, 1fr); 
             gap: 15px;
-            width: 90%; max-width: 1200px;
-            height: 75%; /* Ocupa a maior parte da tela */
-            padding: 20px;
+            width: 90%; max-width: 800px;
+            padding: 10px;
+            overflow-y: auto; /* Permite scroll se necessário em telas pequenas */
+        }
+
+        /* Media query para telas maiores (Desktop/Tablet) */
+        @media (min-width: 768px) {
+            .channel-grid { grid-template-columns: repeat(4, 1fr); }
         }
 
         .channel {
             background: white;
-            border-radius: 20px; /* Bordas bem arredondadas estilo Wii */
-            border: 4px solid #f0f0f0; /* Borda grossa suave */
-            box-shadow: 5px 5px 10px rgba(0,0,0,0.1), inset 0 0 15px rgba(0,0,0,0.05);
+            aspect-ratio: 16/10; /* Garante que o cartão seja retangular perfeito */
+            border-radius: 15px;
+            border: 1px solid #ddd;
+            box-shadow: 2px 2px 10px rgba(0,0,0,0.05), inset 0 0 30px rgba(240,240,240,0.5);
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             cursor: pointer; position: relative; overflow: hidden;
-            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
-            aspect-ratio: 16/9; /* Mantém o formato retangular da TV */
+            transition: all 0.2s ease;
         }
 
         .channel:hover {
             transform: scale(1.05);
-            border-color: #72d7ee; /* Azul Wii */
-            box-shadow: 0 0 0 4px rgba(114, 215, 238, 0.5), 0 15px 25px rgba(0,0,0,0.2);
-            z-index: 100;
+            border-color: var(--wii-blue);
+            box-shadow: 0 0 0 4px rgba(88, 180, 232, 0.3);
         }
 
-        .channel-icon { 
-            font-size: 4rem; 
-            filter: drop-shadow(0 4px 2px rgba(0,0,0,0.1));
-            transition: transform 0.3s;
-        }
-        
-        .channel:hover .channel-icon { transform: scale(1.1) rotate(5deg); }
-
+        .channel-icon { font-size: 3.5rem; margin-bottom: 8px; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.1)); }
         .channel-title { 
-            font-family: 'Chakra Petch', sans-serif; 
-            font-size: 1rem; color: #888; margin-top: 10px;
-            font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+            font-family: 'Chakra Petch', sans-serif; font-size: 0.8rem; color: #777; 
+            font-weight: 800; text-transform: uppercase; letter-spacing: 1px;
         }
 
-        /* BARRA INFERIOR OVAL GRANDE */
-        .wii-footer-container {
-            width: 100%; height: 15%;
-            display: flex; justify-content: center; align-items: flex-start;
-            background: linear-gradient(to bottom, #dcdcdc, #b0b0b0);
-            border-top: 2px solid #aaa;
+        /* FOOTER BAR */
+        .wii-footer {
+            width: 90%; max-width: 600px; height: 60px;
+            background: #fff; border: 1px solid #ccc; border-radius: 30px;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0 30px; margin-bottom: 20px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
         }
 
         .wii-oval-btn {
-            background: radial-gradient(circle at 30% 30%, #fff, #e0e0e0);
-            border-radius: 50%; width: 60px; height: 60px;
-            display: flex; align-items: center; justify-content: center;
-            font-weight: bold; color: #888; font-size: 1.2rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-            border: 2px solid #ccc; cursor: pointer; margin: 0 20px;
-            transition: transform 0.1s;
+            background: #f0f0f0; border: 1px solid #ccc; padding: 8px 25px;
+            border-radius: 20px; font-weight: bold; color: #666; cursor: pointer;
+            font-size: 0.9rem; transition: background 0.2s;
         }
-        .wii-oval-btn:active { transform: scale(0.9); }
+        .wii-oval-btn:hover { background: #e0e0e0; }
 
-        .wii-clock {
-            font-size: 2.5rem; color: #666; font-weight: 300;
-            text-shadow: 1px 1px 0 #fff; margin: 0 40px;
-        }
+        .clock { font-size: 1.5rem; color: #888; font-weight: 300; }
 
-        /* TELAS EXTRAS */
-        #loading { 
-            background: #fff; z-index: 1000; position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            display: flex; align-items: center; justify-content: center; flex-direction: column;
-        }
+        /* LOADING & UTILS */
+        #loading { background: white; z-index: 1000; position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column; }
         .hidden { display: none !important; }
 
-        #game-ui { pointer-events: none; } 
+        /* HUD JOGO */
+        #game-ui { pointer-events: none; }
         #game-ui > * { pointer-events: auto; }
-
+        
         #game-msg {
-            font-family: 'Russo One'; font-size: 5rem; color: #fff;
-            text-shadow: 0 4px 0 #000, 0 0 20px rgba(0,0,0,0.5);
             position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            opacity: 0; transition: opacity 0.3s; width: 100%; text-align: center; pointer-events: none;
+            font-family: 'Russo One'; font-size: 60px; color: #fff;
+            text-shadow: 0 4px 0 #000, 0 0 20px rgba(0,0,0,0.5);
+            width: 100%; text-align: center; pointer-events: none;
         }
+
+        /* Botão Home/Sair Estilo Wii */
+        .home-btn {
+            position: fixed; top: 20px; right: 20px;
+            width: 60px; height: 60px; background: white;
+            border-radius: 50%; border: 2px solid #ccc;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.8rem; cursor: pointer; z-index: 100;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            transition: transform 0.1s;
+        }
+        .home-btn:active { transform: scale(0.9); background: #eee; }
     </style>
 </head>
 <body>
@@ -143,69 +153,55 @@
     <div class="crt-overlay"></div>
     <canvas id="game-canvas"></canvas>
 
-    <!-- LOADING -->
     <div id="loading">
-        <div class="w-20 h-20 border-8 border-gray-200 border-t-blue-400 rounded-full animate-spin"></div>
-        <p class="mt-8 text-gray-400 font-bold tracking-widest text-lg">LIGANDO THIAGUINHO WII...</p>
+        <div class="w-12 h-12 border-4 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+        <p class="mt-4 text-gray-400 font-bold tracking-widest text-sm">A CARREGAR...</p>
     </div>
 
     <!-- MENU PRINCIPAL -->
-    <div id="menu-screen" class="wii-menu hidden">
-        <div style="width:100%; text-align:center; padding-top:10px; color:#aaa; font-size:0.9rem; letter-spacing:2px;">
-            TOUCH START TO BEGIN
+    <div id="menu-screen" class="wii-container hidden">
+        <div class="wii-header">
+            <span class="wii-title">thIAguinho Wii</span>
         </div>
 
         <div class="channel-grid" id="channel-grid">
-            <!-- JS injeta os jogos aqui -->
-            <!-- Canais Vazios para estética -->
-            <div class="channel" style="opacity: 0.6; pointer-events: none; background:#f4f4f4;"></div>
-            <div class="channel" style="opacity: 0.6; pointer-events: none; background:#f4f4f4;"></div>
-            <div class="channel" style="opacity: 0.6; pointer-events: none; background:#f4f4f4;"></div>
-            <div class="channel" style="opacity: 0.6; pointer-events: none; background:#f4f4f4;"></div>
+            <!-- Canais Inseridos via JS -->
         </div>
 
-        <div class="wii-footer-container">
-            <div style="display:flex; align-items:center; margin-top: 15px;">
-                <div class="wii-oval-btn" onclick="window.System.msg('OPÇÕES')">Wii</div>
-                <div class="wii-clock" id="clock">12:00</div>
-                <div class="wii-oval-btn" onclick="location.reload()" title="Reiniciar">↻</div>
-            </div>
+        <div class="wii-footer">
+            <div class="wii-oval-btn" onclick="window.System.msg('PERFIL: ' + window.System.playerId)">Wii</div>
+            <div class="clock" id="clock">12:00</div>
+            <div class="wii-oval-btn" onclick="location.reload()">Start</div>
         </div>
         
-        <div style="position: absolute; bottom: 20px; right: 20px; font-size: 0.8rem; color: #999; font-weight: bold;">
-            REDE: <span id="net-status" style="color: #ccc;">OFFLINE</span>
+        <div style="position: absolute; bottom: 10px; right: 20px; font-size: 0.7rem; color: #bbb;">
+            NET: <span id="net-status" style="color: #999;">OFFLINE</span>
         </div>
     </div>
 
-    <!-- HUD -->
+    <!-- HUD DO JOGO -->
     <div id="game-ui" class="hidden">
-        <div style="position: fixed; top: 25px; left: 25px; background: rgba(0,0,0,0.6); padding: 8px 25px; border-radius: 30px; border: 2px solid rgba(255,255,255,0.3); backdrop-filter: blur(4px);">
-            <span style="color: #aaa; font-size: 0.9rem; font-weight: bold; margin-right: 5px;">SCORE</span>
-            <span id="hud-score" style="color: #fff; font-family: 'Russo One'; font-size: 1.8rem;">0</span>
+        <div style="position: fixed; top: 20px; left: 20px; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); padding: 8px 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.3);">
+            <span style="color: #ddd; font-size: 0.8rem; font-weight: bold; margin-right: 5px;">SCORE</span>
+            <span id="hud-score" style="color: #fff; font-family: 'Russo One'; font-size: 1.4rem;">0</span>
         </div>
         
         <div id="game-msg"></div>
 
-        <button onclick="window.System.home()" 
-                style="position: fixed; top: 25px; right: 25px; width: 60px; height: 60px; background: white; border-radius: 50%; border: 4px solid #ddd; font-size: 1.8rem; color: #555; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.1s;">
-            🏠
-        </button>
+        <!-- Botão HOME para Sair do Jogo -->
+        <button class="home-btn" onclick="window.System.home()" title="Voltar ao Menu">🏠</button>
     </div>
 
-    <!-- GAME OVER -->
-    <div id="screen-over" class="wii-menu hidden" style="background: rgba(0,0,0,0.95); z-index:200;">
-        <h1 style="font-family: 'Russo One'; font-size: 5rem; color: #ff5252; margin-bottom: 10px; text-shadow: 0 0 20px red;">FIM DE JOGO</h1>
-        <div style="background: #222; padding: 30px 60px; border-radius: 20px; text-align: center; border: 3px solid #444;">
-            <p style="color: #aaa; font-size: 1rem; letter-spacing: 2px; margin-bottom:10px;">PONTUAÇÃO FINAL</p>
-            <span id="final-score" style="font-family: 'Russo One'; font-size: 4.5rem; color: #ffd740;">0</span>
+    <!-- TELA GAME OVER -->
+    <div id="screen-over" class="wii-container hidden" style="background: rgba(0,0,0,0.92); justify-content: center; color: white;">
+        <h1 style="font-family: 'Russo One'; font-size: 4rem; color: #ff5252; margin-bottom: 10px;">FIM</h1>
+        <div style="background: #333; padding: 20px 40px; border-radius: 15px; border: 1px solid #555; text-align: center;">
+            <p style="color: #aaa; font-size: 0.9rem;">RESULTADO FINAL</p>
+            <span id="final-score" style="font-family: 'Russo One'; font-size: 3rem; color: #ffd740;">0</span>
         </div>
-        <button onclick="window.System.home()" 
-                style="margin-top: 50px; padding: 15px 50px; background: #fff; border: none; border-radius: 40px; font-weight: bold; font-size: 1.3rem; color: #333; cursor: pointer; box-shadow: 0 0 30px rgba(255,255,255,0.3); transition: transform 0.2s;">
-            VOLTAR AO MENU
-        </button>
+        <button class="wii-oval-btn" onclick="window.System.home()" style="margin-top: 30px; font-size: 1.2rem; padding: 12px 40px;">MENU</button>
     </div>
 
-    <!-- CONFIGURAÇÃO FIREBASE -->
     <script>
         const firebaseConfig = {
             apiKey: "AIzaSyB0ThqhfK6xc8P1D4WCkavhdXbb7zIaQJk",
@@ -220,14 +216,12 @@
             if (typeof firebase !== 'undefined') {
                 firebase.initializeApp(firebaseConfig);
                 window.DB = firebase.database();
-                console.log("🔥 Firebase OK");
                 document.getElementById('net-status').innerHTML = "ONLINE 🟢";
                 document.getElementById('net-status').style.color = "#4caf50";
             }
-        } catch (e) { console.error("Firebase Falhou:", e); }
+        } catch (e) { console.error("Erro Firebase", e); }
     </script>
 
-    <!-- SCRIPTS -->
     <script src="js/core.js"></script>
     <script src="js/game_kart.js"></script>
     <script src="js/game_run.js"></script>
