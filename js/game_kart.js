@@ -1,16 +1,16 @@
 // =============================================================================
-// KART DO OTTO – VERSÃO FINAL (FUSÃO PERFEITA: MULTIPLAYER + GESTOS ANTIGOS)
+// KART DO OTTO – ULTIMATE V14 (FIX CRÍTICO: ERRO DE RAIO NEGATIVO + CAM)
 // =============================================================================
 
 (function() {
 
     // -----------------------------------------------------------------
-    // 1. DADOS E CONFIGURAÇÕES (Idêntico ao ThIAgo.zip para manter o feeling)
+    // 1. DADOS E CONFIGURAÇÕES
     // -----------------------------------------------------------------
     const CHARACTERS = [
-        { id: 0, name: 'OTTO', color: '#e74c3c', speedInfo: 1.0, turnInfo: 1.0, desc: 'Equilibrado' },
-        { id: 1, name: 'SPEED', color: '#f1c40f', speedInfo: 1.08, turnInfo: 0.85, desc: 'Velocidade Máxima' },
-        { id: 2, name: 'TANK', color: '#3498db', speedInfo: 0.92, turnInfo: 1.15, desc: 'Controle Total' }
+        { id: 0, name: 'OTTO', color: '#e74c3c', speedInfo: 1.0, turnInfo: 1.0 },
+        { id: 1, name: 'SPEED', color: '#f1c40f', speedInfo: 1.08, turnInfo: 0.85 },
+        { id: 2, name: 'TANK', color: '#3498db', speedInfo: 0.92, turnInfo: 1.15 }
     ];
 
     const TRACKS = [
@@ -20,44 +20,28 @@
     ];
 
     const CONF = {
-        MAX_SPEED: 235,
-        TURBO_MAX_SPEED: 420,
+        MAX_SPEED: 420,
+        TURBO_MAX_SPEED: 550,
         ACCEL: 1.5,
-        FRICTION: 0.985,
-        OFFROAD_DECEL: 0.93,
-        CENTRIFUGAL_FORCE: 0.19, // Ajuste fino do ThIAgo.zip
-        STEER_AUTHORITY: 0.18,
-        GRIP_DRIFT: 0.94,
-        CRASH_PENALTY: 0.55,
-        DEADZONE: 0.05,
-        INPUT_SMOOTHING: 0.22,
-        TURBO_ZONE_Y: 0.35,      // Zona de ativação do turbo
-        DRAW_DISTANCE: 60
+        FRICTION: 0.96,
+        OFFROAD_DECEL: 0.90,
+        CENTRIFUGAL_FORCE: 0.19,
+        SEGMENT_LENGTH: 200,
+        RUMBLE_LENGTH: 3,
+        DRAW_DISTANCE: 60,
+        TURBO_ZONE_Y: 0.35 
     };
 
-    // Variáveis Globais
     let minimapPoints = [];
     let particles = []; 
     let nitroBtn = null;
     let lapPopupTimer = 0;
     let lapPopupText = "";
     
-    const SEGMENT_LENGTH = 200; 
-    const RUMBLE_LENGTH = 3;    
     let segments = [];
     let trackLength = 0;
 
     const DUMMY_SEG = { curve: 0, y: 0, color: 'light', obs: [], theme: 'grass' };
-
-    // --- FUNÇÃO DE MAPEAMENTO SEGURA (A CHAVE DO SUCESSO) ---
-    // Ignora o Gfx.map do core.js e usa a matemática do ThIAgo.zip
-    // Assume input de webcam 640x480 (padrão MoveNet)
-    function mapPosePoint(p, w, h) {
-        return {
-            x: w - (p.x / 640 * w), // Espelhamento horizontal e escala
-            y: (p.y / 480 * h)      // Escala vertical
-        };
-    }
 
     function getSegment(index) {
         if (!segments || segments.length === 0) return DUMMY_SEG;
@@ -90,27 +74,19 @@
         lastSync: 0,
         autoStartTimer: null,
 
-        // Física
         speed: 0, pos: 0, playerX: 0, steer: 0, targetSteer: 0,
         nitro: 100, turboLock: false,
         driftState: 0, driftDir: 0, driftCharge: 0, mtStage: 0, boostTimer: 0,    
         
-        // Corrida
         lap: 1, totalLaps: 3, time: 0, rank: 1, score: 0, finishTimer: 0,
         
-        // Visual
         visualTilt: 0, bounce: 0, skyColor: 0, 
+        inputState: 0, gestureTimer: 0,
         
-        // INPUT HANDS (RESTAURADO)
-        inputState: 0, 
-        gestureTimer: 0,
-        handLeft: null, 
-        handRight: null, 
-        
-        virtualWheel: { x:0, y:0, r:0, opacity:0 },
-        rivals: [],
+        // FIX: Inicializa com r=60 para evitar o erro de raio negativo ao iniciar
+        virtualWheel: { x:0, y:0, r:60, opacity:0, isHigh: false },
+        rivals: [], 
 
-        // --- INICIALIZAÇÃO ---
         init: function() { 
             this.cleanup(); 
             this.state = 'MODE_SELECT';
@@ -120,7 +96,6 @@
             window.System.msg("SELECIONE O MODO");
         },
 
-        // --- LIMPEZA ---
         cleanup: function() {
             if (this.dbRef) {
                 try { this.dbRef.child('players').off(); } catch(e){}
@@ -141,16 +116,18 @@
                 borderRadius: '50%', background: 'radial-gradient(#ffaa00, #cc5500)', border: '4px solid #fff',
                 color: '#fff', display: 'none', alignItems: 'center', justifyContent: 'center',
                 fontFamily: "sans-serif", fontWeight: "bold", fontSize: '16px', zIndex: '100',
-                boxShadow: '0 0 20px rgba(255, 100, 0, 0.5)', cursor: 'pointer', userSelect: 'none',
-                transition: 'opacity 0.3s'
+                boxShadow: '0 0 20px rgba(255, 100, 0, 0.5)', cursor: 'pointer', userSelect: 'none'
             });
 
             const toggleTurbo = (e) => {
                 if(e) { if(e.cancelable) e.preventDefault(); e.stopPropagation(); }
                 if(this.state !== 'RACE') return;
+                
                 if(this.nitro > 5) {
                     this.turboLock = !this.turboLock;
-                    this.updateNitroVisuals();
+                    nitroBtn.style.transform = this.turboLock ? 'scale(0.95)' : 'scale(1)';
+                    nitroBtn.style.filter = this.turboLock ? 'brightness(1.5)' : 'brightness(1)';
+                    if(this.turboLock) window.Sfx.play(600, 'square', 0.1, 0.1);
                 }
             };
             
@@ -158,7 +135,6 @@
             nitroBtn.addEventListener('mousedown', toggleTurbo);
             document.getElementById('game-ui').appendChild(nitroBtn);
 
-            // Controle de Menus (Clique/Toque na tela)
             window.System.canvas.onclick = (e) => {
                 const rect = window.System.canvas.getBoundingClientRect();
                 const y = e.clientY - rect.top;
@@ -186,18 +162,11 @@
             };
         },
 
-        updateNitroVisuals: function() {
-            if(nitroBtn) {
-                nitroBtn.style.transform = this.turboLock ? 'scale(0.95)' : 'scale(1)';
-                nitroBtn.style.filter = this.turboLock ? 'brightness(1.5)' : 'brightness(1)';
-                if(this.turboLock) window.Sfx.play(600, 'square', 0.1, 0.1);
-            }
-        },
-
         resetPhysics: function() {
             this.speed = 0; this.pos = 0; this.playerX = 0; this.steer = 0;
             this.lap = 1; this.score = 0; this.driftState = 0; this.nitro = 100;
-            this.virtualWheel = { x:0, y:0, r:0, opacity:0 };
+            // FIX: Inicializa r=60
+            this.virtualWheel = { x:0, y:0, r:60, opacity:0, isHigh: false };
             particles = [];
         },
 
@@ -209,7 +178,7 @@
 
             const addRoad = (enter, curve, y) => {
                 for(let i = 0; i < enter; i++) {
-                    const isDark = Math.floor(segments.length / RUMBLE_LENGTH) % 2;
+                    const isDark = Math.floor(segments.length / CONF.RUMBLE_LENGTH) % 2;
                     segments.push({ curve: curve * mult, y: y, color: isDark ? 'dark' : 'light', obs: [], theme: trkConfig.theme });
                 }
             };
@@ -225,12 +194,11 @@
             addProp(sHazards + 15, 'cone', 0); addProp(sHazards + 35, 'cone', -0.6); 
             addRoad(40, 1.2, 0);
 
-            trackLength = segments.length * SEGMENT_LENGTH;
+            trackLength = segments.length * CONF.SEGMENT_LENGTH;
             if(trackLength === 0) trackLength = 2000;
             buildMiniMap(segments);
         },
 
-        // --- GERENCIAMENTO DE REDE ---
         selectMode: function(mode) {
             this.resetPhysics();
             if (mode === 'OFFLINE') {
@@ -271,8 +239,13 @@
                     .filter(id => id !== window.System.playerId)
                     .filter(id => (now - (data[id].lastSeen || 0)) < 15000)
                     .map(id => ({
-                        id: id, ...data[id], isRemote: true, speed: 0,
-                        color: CHARACTERS[data[id].charId || 0].color
+                        id: id,
+                        ...data[id],
+                        isRemote: true,
+                        speed: data[id].speed || 0,
+                        pos: data[id].pos || 0,
+                        x: data[id].x || 0,
+                        color: (data[id].charId !== undefined) ? CHARACTERS[data[id].charId].color : '#fff'
                     }));
                 
                 this.rivals = newRivals;
@@ -313,7 +286,9 @@
         syncLobby: function() {
             if (this.dbRef) {
                 this.dbRef.child('players/' + window.System.playerId).update({
-                    charId: this.selectedChar, trackId: this.selectedTrack, ready: this.isReady,
+                    charId: this.selectedChar,
+                    trackId: this.selectedTrack,
+                    ready: this.isReady,
                     lastSeen: firebase.database.ServerValue.TIMESTAMP
                 });
             }
@@ -329,240 +304,207 @@
             window.System.canvas.onclick = null;
         },
 
-        // -------------------------------------------------------------
-        // UPDATE LOOP
-        // -------------------------------------------------------------
         update: function(ctx, w, h, pose) {
             try {
                 if (this.state === 'MODE_SELECT') { this.renderModeSelect(ctx, w, h); return; }
                 if (this.state === 'LOBBY' || this.state === 'WAITING') { this.renderLobby(ctx, w, h); return; }
-
                 if (!segments || segments.length === 0) return 0;
                 
-                // Atualiza física com a lógica do arquivo antigo
                 this.updatePhysics(w, h, pose);
                 this.renderWorld(ctx, w, h);
                 this.renderUI(ctx, w, h);
                 
-                if (this.isOnline) { try { this.syncMultiplayer(); } catch(e) {} }
-                
+                if (this.isOnline) this.syncMultiplayer();
                 return Math.floor(this.score);
             } catch (err) {
                 console.error("Erro recuperado:", err);
-                this.speed = 0;
                 return 0;
             }
         },
 
         syncMultiplayer: function() {
-            if (Date.now() - this.lastSync > 80) {
+            if (Date.now() - this.lastSync > 100) {
                 this.lastSync = Date.now();
                 this.dbRef.child('players/' + window.System.playerId).update({
-                    pos: Math.floor(this.pos), x: this.playerX, lap: this.lap,
+                    pos: Math.floor(this.pos),
+                    x: this.playerX,
+                    lap: this.lap,
+                    steer: this.steer,
+                    charId: this.selectedChar,
                     lastSeen: firebase.database.ServerValue.TIMESTAMP
                 });
             }
         },
 
-        // -------------------------------------------------------------
-        // FÍSICA E DETECÇÃO (LÓGICA EXATA DO THIAGO.ZIP)
-        // -------------------------------------------------------------
         updatePhysics: function(w, h, pose) {
             const d = Logic;
             const charStats = CHARACTERS[this.selectedChar];
 
-            // Limpeza
             if (!Number.isFinite(d.speed)) d.speed = 0;
             if (!Number.isFinite(d.pos)) d.pos = 0;
-            if (!Number.isFinite(d.playerX)) d.playerX = 0;
             
-            // --- A. INPUT SYSTEM (RESTAURADO DO THIAGO.ZIP) ---
+            // --- DETECÇÃO DE MÃOS ---
             let detected = 0;
             let pLeft = null, pRight = null;
+            let nose = null;
 
             if (d.state === 'RACE' && pose && pose.keypoints) {
                 const lw = pose.keypoints.find(k => k.name === 'left_wrist');
                 const rw = pose.keypoints.find(k => k.name === 'right_wrist');
-                
-                // IMPORTANTE: Usa mapPosePoint local para garantir coordenadas corretas
-                if (lw && lw.score > 0.3) { pLeft = mapPosePoint(lw, w, h); detected++; }
-                if (rw && rw.score > 0.3) { pRight = mapPosePoint(rw, w, h); detected++; }
+                const n  = pose.keypoints.find(k => k.name === 'nose');
 
-                d.handLeft = pLeft;
-                d.handRight = pRight;
+                // Lógica simples e robusta (sem detecção dinâmica que falha)
+                const mapPoint = (pt) => {
+                    let nx = pt.x;
+                    let ny = pt.y;
+                    if (nx > 1) nx = nx / 640; 
+                    if (ny > 1) ny = ny / 480;
+                    return { x: (1 - nx) * w, y: ny * h };
+                };
 
-                // Gesto Turbo (Mãos para cima)
-                let avgY = h;
-                if (detected === 2) avgY = (pLeft.y + pRight.y) / 2;
-                else if (detected === 1) avgY = (pLeft ? pLeft.y : pRight.y);
+                // Limiar 0.15 (robusto)
+                if (lw && lw.score > 0.15) { pLeft = mapPoint(lw); detected++; }
+                if (rw && rw.score > 0.15) { pRight = mapPoint(rw); detected++; }
+                if (n && n.score > 0.15) { nose = mapPoint(n); }
 
-                if (avgY < h * CONF.TURBO_ZONE_Y) {
-                    d.gestureTimer++;
-                    if (d.gestureTimer === 12 && d.nitro > 5) { 
-                        d.turboLock = !d.turboLock; 
-                        this.updateNitroVisuals();
-                        window.System.msg(d.turboLock ? "TURBO LIGADO!" : "TURBO DESLIGADO");
+                // TURBO GESTUAL
+                if (detected === 2 && nose) {
+                    const isHandsHigh = (pLeft.y < nose.y && pRight.y < nose.y);
+                    d.virtualWheel.isHigh = isHandsHigh;
+
+                    if (isHandsHigh) {
+                         d.gestureTimer++;
+                         if (d.gestureTimer > 15 && d.nitro > 5) { d.turboLock = true; window.System.msg("TURBO ATIVADO!"); }
+                    } else { 
+                        d.gestureTimer = 0; 
+                        if (d.nitro <= 0) d.turboLock = false; 
                     }
                 } else {
-                    d.gestureTimer = 0;
+                    d.virtualWheel.isHigh = false;
                 }
-                
-                // Esconde botão se estiver usando gestos
-                if(nitroBtn) nitroBtn.style.opacity = (detected > 0) ? '0.3' : '1.0';
             }
 
-            // Cálculo do Volante
+            // VOLANTE E INPUT
             if (detected === 2) {
-                d.inputState = 2;
-                const dx = pRight.x - pLeft.x;
+                d.inputState = 2; // DETECTOU MÃOS!
+                const dx = pRight.x - pLeft.x; 
                 const dy = pRight.y - pLeft.y;
                 const rawAngle = Math.atan2(dy, dx);
-                d.targetSteer = (Math.abs(rawAngle) > CONF.DEADZONE) ? rawAngle * 2.3 : 0;
+                d.targetSteer = (Math.abs(rawAngle) > 0.05) ? rawAngle * 2.5 : 0;
                 
-                // Feedback UI
-                d.virtualWheel.x = (pLeft.x + pRight.x) / 2;
+                d.virtualWheel.x = (pLeft.x + pRight.x) / 2; 
                 d.virtualWheel.y = (pLeft.y + pRight.y) / 2;
-                d.virtualWheel.r = Math.hypot(dx, dy) / 2;
-                d.virtualWheel.opacity = 1;
+                d.virtualWheel.r = Math.max(40, Math.hypot(dx, dy) / 2); 
+                d.virtualWheel.opacity = 1.0; 
             } else {
-                d.inputState = 0;
-                d.targetSteer = 0;
+                d.inputState = 0; // SEM MÃOS
+                d.targetSteer = 0; 
+                d.virtualWheel.isHigh = false;
                 
-                // Centraliza volante suavemente (Modo Fantasma)
-                if (d.virtualWheel.x === 0) { d.virtualWheel.x = w/2; d.virtualWheel.y = h*0.75; }
+                // Volta para o centro se perder as mãos
                 d.virtualWheel.x += ((w / 2) - d.virtualWheel.x) * 0.1;
                 d.virtualWheel.y += ((h * 0.75) - d.virtualWheel.y) * 0.1;
                 d.virtualWheel.r += (60 - d.virtualWheel.r) * 0.1;
                 d.virtualWheel.opacity += (0.3 - d.virtualWheel.opacity) * 0.1;
             }
             
-            // Suavização do input
-            d.steer += (d.targetSteer - d.steer) * CONF.INPUT_SMOOTHING;
+            d.steer += (d.targetSteer - d.steer) * CONF.FRICTION;
             d.steer = Math.max(-1.5, Math.min(1.5, d.steer));
 
-            // --- B. FÍSICA DO CARRO ---
+            // --- LÓGICA DE ACELERAÇÃO ---
             let currentMax = CONF.MAX_SPEED * charStats.speedInfo;
-            
-            // Consumo de Turbo
-            if (d.turboLock && d.nitro > 0) {
-                currentMax = CONF.TURBO_MAX_SPEED; 
-                d.nitro -= 0.6;
-                if(d.nitro <= 0) { d.nitro = 0; d.turboLock = false; this.updateNitroVisuals(); }
-            } else { 
-                d.turboLock = false; 
-                d.nitro = Math.min(100, d.nitro + 0.15); // Recarga lenta
-            }
-            
-            if(d.boostTimer > 0) { currentMax += 80; d.boostTimer--; }
+            if (d.turboLock && d.nitro > 0) { currentMax = CONF.TURBO_MAX_SPEED; d.nitro -= 0.6; if(d.nitro <= 0) { d.nitro = 0; d.turboLock = false; } }
+            else { d.nitro = Math.min(100, d.nitro + 0.1); }
+            if(d.boostTimer > 0) { currentMax += 100; d.boostTimer--; }
 
-            const hasGas = (d.inputState > 0 || d.turboLock);
-            if (hasGas && d.state === 'RACE') d.speed += (currentMax - d.speed) * 0.075;
-            else d.speed *= CONF.FRICTION;
+            const hasGas = (d.inputState > 0 || d.turboLock); 
+            
+            if (hasGas && d.state === 'RACE') {
+                d.speed += (currentMax - d.speed) * 0.075;
+            } else {
+                d.speed *= CONF.FRICTION; // FREIA SE SOLTAR
+            }
 
             if (Math.abs(d.playerX) > 2.2) d.speed *= CONF.OFFROAD_DECEL;
-            
-            // Movimentação lateral (Curvas)
-            const segIdx = Math.floor(d.pos / SEGMENT_LENGTH);
+
+            // Movimento Lateral
+            const segIdx = Math.floor(d.pos / CONF.SEGMENT_LENGTH);
             const seg = getSegment(segIdx);
             const speedRatio = d.speed / CONF.MAX_SPEED;
             const centrifugal = -seg.curve * (speedRatio * speedRatio) * CONF.CENTRIFUGAL_FORCE; 
-            
-            let dynamicGrip = 1.0; 
-            if(d.driftState === 1) dynamicGrip = CONF.GRIP_DRIFT; 
-            
-            const steerPower = CONF.STEER_AUTHORITY * charStats.turnInfo;
-            // Combina direção do jogador + força centrífuga
-            d.playerX += (d.steer * steerPower * dynamicGrip * speedRatio) + (centrifugal * (1 - Math.abs(d.steer)*0.5));
+            const steerPower = 0.18 * charStats.turnInfo;
+            d.playerX += (d.steer * steerPower * speedRatio) + (centrifugal * (1 - Math.abs(d.steer)*0.5));
 
-            // Limites da pista
             if(d.playerX < -4.5) { d.playerX = -4.5; d.speed *= 0.95; }
             if(d.playerX > 4.5)  { d.playerX = 4.5;  d.speed *= 0.95; }
 
-            // Drift
-            if (d.driftState === 0) {
-                if (Math.abs(d.steer) > 1.0 && speedRatio > 0.6) {
-                    d.driftState = 1; d.driftDir = Math.sign(d.steer); d.driftCharge = 0; d.bounce = -8; window.Sfx.skid();
-                }
-            } else {
-                if (Math.abs(d.steer) < 0.3 || speedRatio < 0.3) {
-                    if (d.mtStage > 0) { 
-                        d.boostTimer = d.mtStage * 40; 
-                        window.System.msg("BOOST!"); 
-                        window.Sfx.play(800, 'square', 0.2, 0.2); 
-                    }
-                    d.driftState = 0; d.mtStage = 0;
-                } else { 
-                    d.driftCharge++; 
-                    if(d.driftCharge > 80) d.mtStage = 2; else if(d.driftCharge > 40) d.mtStage = 1; 
-                }
-            }
-
-            // Colisão Obstáculos
+            // COLISÕES COM OBSTÁCULOS
             seg.obs.forEach(o => {
                 if(o.x < 10 && Math.abs(d.playerX - o.x) < 0.35 && Math.abs(d.playerX) < 4.0) {
-                    d.speed *= CONF.CRASH_PENALTY; o.x = 999;
-                    d.bounce = -15; 
-                    window.Sfx.crash(); 
-                    window.Gfx.shakeScreen(15);
+                    d.speed *= 0.55; o.x = 999; d.bounce = -15; window.Sfx.crash(); window.Gfx.shakeScreen(15);
                 }
             });
 
-            // Loop da Pista
+            // COLISÃO ENTRE JOGADORES (PVP)
+            d.rivals.forEach(r => {
+                let distZ = r.pos - d.pos;
+                if (distZ > trackLength / 2) distZ -= trackLength;
+                if (distZ < -trackLength / 2) distZ += trackLength;
+                let distX = r.x - d.playerX;
+
+                if (Math.abs(distZ) < 300 && Math.abs(distX) < 0.6) {
+                    d.speed *= 0.95; 
+                    d.bounce = -5;
+                    d.playerX -= (distX > 0 ? 0.08 : -0.08); 
+                    if (Math.random() > 0.8) { window.Sfx.crash(); window.Gfx.shakeScreen(5); }
+                }
+            });
+
             d.pos += d.speed;
             if (d.pos >= trackLength) {
-                d.pos -= trackLength;
-                d.lap++;
-                if (d.lap <= d.totalLaps) { 
-                    lapPopupText = `VOLTA ${d.lap}/${d.totalLaps}`; 
-                    lapPopupTimer = 120; 
-                    window.System.msg(lapPopupText); 
-                }
-                if(d.lap > d.totalLaps && d.state === 'RACE') { 
-                    d.state = 'FINISHED'; 
-                    window.System.msg(d.rank === 1 ? "VITÓRIA!" : "FIM!"); 
-                }
+                d.pos -= trackLength; d.lap++;
+                if (d.lap <= d.totalLaps) { lapPopupText = `VOLTA ${d.lap}/${d.totalLaps}`; lapPopupTimer = 120; window.System.msg(lapPopupText); }
+                if(d.lap > d.totalLaps && d.state === 'RACE') { d.state = 'FINISHED'; window.System.msg(d.rank === 1 ? "VITÓRIA!" : "FIM!"); }
             }
             if (d.pos < 0) d.pos += trackLength;
 
-            // IA Rivais (Loop Seguro)
+            // RIVAIS
             let pAhead = 0;
             d.rivals.forEach(r => {
-                if (!r.isRemote) {
+                if (r.isRemote) {
+                    r.pos += r.speed; 
+                    if(r.pos >= trackLength) { r.pos -= trackLength; r.lap++; }
+                } else {
                     let dist = r.pos - d.pos;
                     if(dist > trackLength/2) dist -= trackLength; if(dist < -trackLength/2) dist += trackLength;
                     let targetS = CONF.MAX_SPEED * 0.45;
-                    if(dist > 1200) targetS *= 0.82; if(dist < -1200) targetS *= 1.05;
                     r.speed += (targetS - r.speed) * (r.aggro || 0.03);
                     r.pos += r.speed;
                     if(r.pos >= trackLength) { r.pos -= trackLength; r.lap++; }
                     if(r.pos < 0) r.pos += trackLength;
-
-                    const rSeg = getSegment(Math.floor(r.pos/SEGMENT_LENGTH));
-                    let idealLine = -(rSeg.curve * 0.6);
-                    r.x += (idealLine - r.x) * 0.05;
+                    const rSeg = getSegment(Math.floor(r.pos/CONF.SEGMENT_LENGTH));
+                    r.x += (-(rSeg.curve * 0.6) - r.x) * 0.05;
                 }
+                
                 let playerTotalDist = d.pos + (d.lap * trackLength);
-                let rivalTotalDist = r.pos + (r.lap * trackLength);
+                let rivalTotalDist = r.pos + ((r.lap||1) * trackLength);
                 if (rivalTotalDist > playerTotalDist) pAhead++;
             });
             d.rank = 1 + pAhead;
 
             d.time++; d.score += d.speed * 0.01; d.bounce *= 0.8;
-            
             if(Math.abs(d.playerX) > 2.2) { d.bounce = Math.sin(d.time)*5; window.Gfx.shakeScreen(2); }
             d.visualTilt += (d.steer * 15 - d.visualTilt) * 0.1;
             
             if (d.state === 'FINISHED') {
                 d.speed *= 0.95;
-                if(d.speed < 2 && d.finishTimer === 0) {
-                    d.finishTimer = 1; setTimeout(()=> window.System.gameOver(Math.floor(d.score)), 2000);
-                }
+                if(d.speed < 2 && d.finishTimer === 0) { d.finishTimer = 1; setTimeout(()=> window.System.gameOver(Math.floor(d.score)), 2000); }
             }
         },
 
         renderWorld: function(ctx, w, h) {
             const d = Logic; const cx = w / 2; const horizon = h * 0.40;
-            const currentSegIndex = Math.floor(d.pos / SEGMENT_LENGTH);
+            const currentSegIndex = Math.floor(d.pos / CONF.SEGMENT_LENGTH);
             const isOffRoad = Math.abs(d.playerX) > 2.2;
 
             const skyGrads = [['#3388ff', '#88ccff'], ['#e67e22', '#f1c40f'], ['#0984e3', '#74b9ff']];
@@ -588,7 +530,8 @@
             let dx = 0; let camX = d.playerX * (w * 0.4);
             let segmentCoords = [];
 
-            for(let n = 0; n < 80; n++) {
+            // 1. DESENHA A ESTRADA (FUNDO P/ FRENTE)
+            for(let n = 0; n < CONF.DRAW_DISTANCE; n++) {
                 const segIdx = currentSegIndex + n;
                 const seg = getSegment(segIdx);
                 const segTheme = themes[seg.theme || 'grass'];
@@ -623,23 +566,24 @@
                 ctx.fill();
             }
 
-            for(let n = 79; n >= 0; n--) {
+            // 2. DESENHA OBJETOS E RIVAIS (TRAS P/ FRENTE)
+            for(let n = CONF.DRAW_DISTANCE - 1; n >= 0; n--) {
                 const coord = segmentCoords[n]; 
                 if (!coord) continue;
                 const seg = getSegment(coord.index);
+
                 d.rivals.forEach(r => {
-                    let rRelPos = r.pos - d.pos; if(rRelPos < -trackLength/2) rRelPos += trackLength; if(rRelPos > trackLength/2) rRelPos -= trackLength;
-                    if (Math.abs(Math.floor(rRelPos / SEGMENT_LENGTH) - n) < 1.5 && n > 1) {
-                        ctx.save(); 
-                        ctx.translate(coord.x + (r.x * (w * 3) * coord.scale / 2), coord.y); 
-                        ctx.scale(coord.scale * 12, coord.scale * 12);
-                        ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.ellipse(0, 0, 8, 3, 0, 0, Math.PI*2); ctx.fill();
-                        ctx.fillStyle = r.color; ctx.fillRect(-6, -8, 12, 6);
-                        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, -12, 4, 0, Math.PI*2); ctx.fill();
-                        if (r.isRemote) { ctx.fillStyle = '#0f0'; ctx.font='bold 2px Arial'; ctx.textAlign='center'; ctx.fillText('P2', 0, -18); }
-                        ctx.restore();
+                    let rRelPos = r.pos - d.pos; 
+                    if(rRelPos < -trackLength/2) rRelPos += trackLength; 
+                    if(rRelPos > trackLength/2) rRelPos -= trackLength;
+
+                    if (Math.abs(Math.floor(rRelPos / CONF.SEGMENT_LENGTH) - n) < 2.0 && n > 0) {
+                        const rScale = coord.scale * w * 0.0055;
+                        const rx = coord.x + (r.x * (w * 3) * coord.scale / 2);
+                        this.drawKartSprite(ctx, rx, coord.y, rScale, 0, 0, r, r.color, true);
                     }
                 });
+
                 seg.obs.forEach(o => {
                     if (o.x > 500) return;
                     const sX = coord.x + (o.x * (w * 3) * coord.scale / 2); const size = (w * 0.22) * coord.scale;
@@ -648,31 +592,27 @@
                         ctx.moveTo(sX, coord.y - size); ctx.lineTo(sX - size*0.3, coord.y); ctx.lineTo(sX + size*0.3, coord.y); 
                         ctx.fill(); 
                     }
-                    else { 
-                        ctx.fillStyle = '#f1c40f'; ctx.fillRect(sX - size/2, coord.y - size, size, size*0.6); 
-                        ctx.fillStyle = '#000'; ctx.textAlign='center'; ctx.font = `bold ${size*0.4}px Arial`; 
-                        ctx.fillText(seg.curve > 0 ? ">>>" : "<<<", sX, coord.y - size*0.2); 
-                    }
                 });
             }
             
             const playerColor = CHARACTERS[d.selectedChar].color;
-            this.drawKartSprite(ctx, cx, h*0.85 + d.bounce, w * 0.0055, d.steer, d.visualTilt, d, playerColor);
+            this.drawKartSprite(ctx, cx, h*0.85 + d.bounce, w * 0.0055, d.steer, d.visualTilt, d, playerColor, false);
             
             particles.forEach((p, i) => { 
                 p.x += p.vx; p.y += p.vy; p.l--; 
                 if(p.l<=0) particles.splice(i,1); 
                 else { ctx.fillStyle=p.c; ctx.globalAlpha = p.l / 50; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1.0; } 
             });
-            
-            if(particles.length > 40) particles = particles.slice(particles.length - 40);
         },
 
-        drawKartSprite: function(ctx, cx, y, carScale, steer, tilt, d, color) {
-            ctx.save(); ctx.translate(cx, y); ctx.scale(carScale, carScale);
+        drawKartSprite: function(ctx, cx, y, carScale, steer, tilt, d, color, isRival) {
+            ctx.save(); 
+            ctx.translate(cx, y); 
+            ctx.scale(carScale, carScale);
             ctx.rotate(tilt * 0.02 + (d.driftState === 1 ? d.driftDir * 0.3 : 0));
             
             ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(0, 35, 60, 15, 0, 0, Math.PI*2); ctx.fill();
+            
             const gradBody = ctx.createLinearGradient(-30, 0, 30, 0); 
             gradBody.addColorStop(0, color); gradBody.addColorStop(0.5, '#fff'); gradBody.addColorStop(1, color);
             ctx.fillStyle = gradBody; 
@@ -696,8 +636,15 @@
             ctx.save(); ctx.translate(0, -10); ctx.rotate(steer * 0.3); 
             ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, -20, 18, 0, Math.PI*2); ctx.fill(); 
             ctx.fillStyle = '#333'; ctx.fillRect(-15, -25, 30, 8); 
-            ctx.fillStyle = 'red'; ctx.font='bold 12px Arial'; ctx.textAlign='center'; ctx.fillText('M', 0, -32);
-            ctx.restore(); ctx.restore(); 
+            
+            if (isRival) {
+                ctx.fillStyle = '#0f0'; ctx.font='bold 12px Arial'; ctx.textAlign='center'; ctx.fillText('P2', 0, -32);
+            } else {
+                ctx.fillStyle = 'red'; ctx.font='bold 12px Arial'; ctx.textAlign='center'; ctx.fillText('EU', 0, -32);
+            }
+            ctx.restore(); 
+            
+            ctx.restore(); 
         },
 
         renderModeSelect: function(ctx, w, h) {
@@ -723,22 +670,19 @@
             ctx.fillStyle = c.color; ctx.beginPath(); ctx.arc(w/2, h*0.3, 60, 0, Math.PI*2); ctx.fill();
             ctx.fillStyle = "white"; ctx.font = "bold 30px sans-serif";
             ctx.fillText(c.name, w/2, h*0.3 + 100);
-            ctx.font = "20px sans-serif"; ctx.fillText(c.desc, w/2, h*0.3 + 130);
-            ctx.fillText("◄ TOQUE SUPERIOR P/ MUDAR ►", w/2, h*0.3 - 80);
-
+            
             const t = TRACKS[this.selectedTrack];
             ctx.fillStyle = "#34495e"; ctx.fillRect(w/2 - 150, h*0.55, 300, 60);
             ctx.fillStyle = "#ecf0f1"; ctx.fillText("PISTA: " + t.name, w/2, h*0.55 + 40);
 
-            let btnText = "PRONTO (TOQUE EM BAIXO)";
+            let btnText = "PRONTO (TOQUE P/ INICIAR)";
             let btnColor = "#e67e22";
 
             if (this.state === 'WAITING') {
-                btnText = "AGUARDANDO JOGADORES...";
+                btnText = "AGUARDANDO...";
                 if (this.autoStartTimer) {
                     const timeLeft = Math.ceil((this.autoStartTimer - Date.now()) / 1000);
                     btnText = `INICIANDO EM ${timeLeft}s...`;
-                    btnColor = "#c0392b";
                 }
             } else if (this.state === 'LOBBY') {
                 btnColor = "#27ae60";
@@ -761,7 +705,6 @@
                     ctx.fillText(lapPopupText, w / 2, h * 0.45); ctx.restore(); lapPopupTimer--; 
                 }
                 
-                // HUD
                 const hudX = w - 80; const hudY = h - 60; 
                 ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.arc(hudX, hudY, 55, 0, Math.PI * 2); ctx.fill();
                 const rpm = Math.min(1, d.speed / CONF.TURBO_MAX_SPEED); 
@@ -770,14 +713,12 @@
                 
                 ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; 
                 ctx.font = "bold 36px 'Russo One'"; ctx.fillText(Math.floor(d.speed), hudX, hudY + 10);
-                ctx.font = "bold 14px Arial"; ctx.fillText(`POSIÇÃO`, hudX, hudY + 22); 
                 ctx.font = "bold 18px 'Russo One'"; ctx.fillText(`${d.rank} / ${d.rivals.length + 1}`, hudX, hudY + 42);
                 
                 const nW = 220; ctx.fillStyle = '#111'; ctx.fillRect(w / 2 - nW / 2, 20, nW, 20); 
                 ctx.fillStyle = d.turboLock ? '#00ffff' : (d.nitro > 20 ? '#00aa00' : '#ff3300'); 
                 ctx.fillRect(w / 2 - nW / 2 + 2, 22, (nW - 4) * (d.nitro / 100), 16);
 
-                // MINI MAPA
                 if (minimapPoints.length > 0) {
                     const mapSize = 130; const mapX = 25; const mapY = 95; ctx.save();
                     ctx.fillStyle = 'rgba(10, 25, 40, 0.8)'; ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 2; 
@@ -789,7 +730,7 @@
                     const s = Math.min(mapSize / (b.maxX - b.minX), mapSize / (b.maxY - b.minY)) * 0.85;
                     
                     ctx.translate(mapX + mapSize / 2, mapY + mapSize / 2); ctx.scale(s, s); 
-                    ctx.rotate(-getSegment(Math.floor(d.pos / SEGMENT_LENGTH)).curve * 0.7);
+                    ctx.rotate(-getSegment(Math.floor(d.pos / CONF.SEGMENT_LENGTH)).curve * 0.7);
                     ctx.translate(-(b.minX + b.maxX) / 2, -(b.minY + b.maxY) / 2); 
                     
                     ctx.strokeStyle = '#39ff14'; ctx.lineWidth = 4; ctx.beginPath();
@@ -797,41 +738,38 @@
                     
                     const pi = Math.floor((d.pos / trackLength) * minimapPoints.length) % minimapPoints.length;
                     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(minimapPoints[pi].x, minimapPoints[pi].y, 6, 0, Math.PI * 2); ctx.fill();
-                    d.rivals.forEach(r => { ctx.fillStyle = r.color; ctx.beginPath(); ctx.arc(minimapPoints[Math.floor((r.pos / trackLength) * minimapPoints.length) % minimapPoints.length].x, minimapPoints[Math.floor((r.pos / trackLength) * minimapPoints.length) % minimapPoints.length].y, 4, 0, Math.PI * 2); ctx.fill(); });
+                    
+                    d.rivals.forEach(r => { 
+                        let rIdx = Math.floor((r.pos / trackLength) * minimapPoints.length) % minimapPoints.length;
+                        if(minimapPoints[rIdx]) {
+                            ctx.fillStyle = r.color; ctx.beginPath(); 
+                            ctx.arc(minimapPoints[rIdx].x, minimapPoints[rIdx].y, 4, 0, Math.PI * 2); ctx.fill(); 
+                        }
+                    });
                     ctx.restore();
                 }
 
-                // VOLANTE & MÃOS VISUAIS (Feedback Visual Claro)
                 if (d.virtualWheel.opacity > 0.01) {
                     const vw = d.virtualWheel; 
-                    
                     ctx.save(); 
-                    ctx.globalAlpha = vw.opacity;
-                    
-                    // Desenha o "Link Holográfico" entre as mãos (Se detectadas)
-                    if (d.handLeft && d.handRight && d.inputState === 2) {
-                        ctx.beginPath();
-                        ctx.moveTo(d.handLeft.x, d.handLeft.y);
-                        ctx.lineTo(d.handRight.x, d.handRight.y);
-                        ctx.strokeStyle = 'rgba(0, 255, 255, 0.4)';
-                        ctx.lineWidth = 4;
-                        ctx.setLineDash([5, 5]);
-                        ctx.stroke();
-                        ctx.setLineDash([]);
-                        
-                        // Círculos nas mãos
-                        ctx.fillStyle = 'rgba(0, 255, 255, 0.6)';
-                        ctx.beginPath(); ctx.arc(d.handLeft.x, d.handLeft.y, 8, 0, Math.PI*2); ctx.fill();
-                        ctx.beginPath(); ctx.arc(d.handRight.x, d.handRight.y, 8, 0, Math.PI*2); ctx.fill();
-                    }
-
-                    // Volante no centro
+                    ctx.globalAlpha = vw.opacity; 
                     ctx.translate(vw.x, vw.y);
                     
-                    ctx.lineWidth = 8; ctx.strokeStyle = '#222'; ctx.beginPath(); ctx.arc(0, 0, vw.r, 0, Math.PI * 2); ctx.stroke();
-                    ctx.lineWidth = 4; ctx.strokeStyle = '#00ffff'; ctx.beginPath(); ctx.arc(0, 0, vw.r - 8, 0, Math.PI * 2); ctx.stroke();
+                    if (vw.isHigh) {
+                        ctx.shadowBlur = 25;
+                        ctx.shadowColor = '#00ffff';
+                    } else {
+                        ctx.shadowBlur = 0;
+                    }
+
+                    // FIX CRÍTICO AQUI: Garantir que o raio nunca seja negativo
+                    const safeR = Math.max(0, vw.r);
+                    const safeInnerR = Math.max(0, vw.r - 8);
+
+                    ctx.lineWidth = 8; ctx.strokeStyle = '#222'; ctx.beginPath(); ctx.arc(0, 0, safeR, 0, Math.PI * 2); ctx.stroke();
+                    ctx.lineWidth = 4; ctx.strokeStyle = '#00ffff'; ctx.beginPath(); ctx.arc(0, 0, safeInnerR, 0, Math.PI * 2); ctx.stroke();
                     ctx.rotate(d.steer * 1.4); 
-                    ctx.fillStyle = '#ff3300'; ctx.beginPath(); ctx.fillRect(-4, -vw.r + 10, 8, 22);
+                    ctx.fillStyle = '#ff3300'; ctx.beginPath(); ctx.fillRect(-4, -safeR + 10, 8, 22);
                     ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill(); 
                     ctx.restore();
                 }
