@@ -19,7 +19,7 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;700&family=Russo+One&family=Roboto:wght@300;400;700&display=swap');
 
-        /* WII AESTHETICS - PRESERVADO DO GAME.ZIP */
+        /* WII AESTHETICS */
         :root {
             --wii-gray: #ececec;
             --wii-shadow: rgba(0,0,0,0.15);
@@ -32,7 +32,7 @@
             font-family: 'Roboto', sans-serif; 
             user-select: none; 
             background: radial-gradient(circle at center, #ffffff 0%, #e0e0e0 100%);
-            touch-action: none; /* Impede zoom/scroll no mobile */
+            touch-action: none;
         }
 
         /* Scanlines TV */
@@ -42,7 +42,7 @@
             background-size: 100% 3px, 3px 100%;
         }
 
-        /* WebCam (Canto inferior direito) */
+        /* WebCam */
         #webcam { 
             position: absolute; bottom: 20px; right: 20px; width: 120px; 
             border-radius: 12px; border: 4px solid white; 
@@ -195,9 +195,12 @@
         }
     </script>
 
-    <!-- SISTEMA -->
+    <!-- SISTEMA E JOGOS (ORDEM IMPORTA) -->
     <script src="js/core.js"></script>
     <script src="js/game_kart.js"></script>
+    <script src="js/game_run.js"></script>
+    <script src="js/game_box.js"></script>
+    <script src="js/game_tennis.js"></script>
 
     <script>
         setInterval(() => {
